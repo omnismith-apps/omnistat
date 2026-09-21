@@ -1,0 +1,23 @@
+# Binaries
+/bin/
+/dist/
+/omnistat
+*.exe
+*.test
+*.out
+
+# Go
+/vendor/
+coverage.*
+
+# Local config & secrets — never commit tokens
+.env
+.env.*
+!.env.example
+*.local.yaml
+*.local.toml
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
