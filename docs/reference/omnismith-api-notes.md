@@ -5,7 +5,7 @@ Working notes for agents. Verify against the OpenAPI contract (`openapi.yaml` in
 
 ## Go SDK
 
-- Module: `github.com/omnismith-sdk/go` (latest tag at scaffold time: **v1.0.13**, `go 1.23`).
+- Module: `github.com/omnismith-sdk/go` (pinned: **v1.0.14**, `go 1.23`).
 - OpenAPI-generated, flat package. Import as `omnismithsdk "github.com/omnismith-sdk/go"`.
 - Construction:
   ```go

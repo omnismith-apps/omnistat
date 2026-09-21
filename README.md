@@ -6,8 +6,8 @@ attributes it needs, omnistat reconciles that schema in the target project, then
 publishes dimensions and ingests metrics. Slugs have stable defaults and can be
 remapped in config to fit an existing schema or marketplace blueprint.
 
-> Status: **scaffolded, no behaviour yet.** This project is developed spec-first —
-> see [`specs/README.md`](specs/README.md). The first feature spec is still to be written.
+> Status: **early.** Developed spec-first — see [`specs/README.md`](specs/README.md).
+> Feature 001 (schema reconciliation) is implemented; feature 002 (host identity) is next.
 
 ## Why
 
@@ -16,14 +16,37 @@ metric time series, dashboards and automations). `omnistat` is the first app in 
 `omnismith-apps` organisation and doubles as a dogfooding exercise for the official
 Go SDK, [`github.com/omnismith-sdk/go`](https://github.com/omnismith-sdk/go).
 
-## Quick start (for now)
+## Quick start
 
 ```bash
-make build && ./bin/omnistat version
+make build
+export OMNISMITH_ACCESS_TOKEN=omni_...      # never put this in a file that is committed
+export OMNISMITH_PROJECT_ID=<project uuid>
+./bin/omnistat schema plan                  # dry-run: what would be created (exit 2 = changes pending)
+./bin/omnistat schema apply                 # create what is missing — additive only, never deletes
+./bin/omnistat schema verify                # for hosts whose token cannot write the schema
 ```
 
-Configuration is read from the environment — copy `.env.example` to `.env`
-(git-ignored) and fill in an `omni_…` access token and a project id.
+Optional `omnistat.yaml` (picked up from the working directory, or `--config`):
+
+```yaml
+project_id: 01a0c47a-...
+schema:
+  mode: apply            # apply | verify | off
+  host_template: server  # remap the default `host` template to an existing one
+modules:
+  cpu:
+    enabled: true
+    attributes:
+      usage: { slug: cpu_usage }   # fit an existing attribute
+http: { timeout: 15s, retries: 3 }
+log:  { level: info, format: text }
+```
+
+Each module ships stable default slugs; overrides exist to fit an existing schema.
+Reconciliation only ever *creates* templates, attributes, list options and bindings.
+An existing attribute whose kind differs from the manifest is reported as a conflict
+and nothing is written.
 
 ## Layout
 

@@ -1,0 +1,125 @@
+package config_test
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/omnismith-apps/omnistat/internal/config"
+)
+
+func env(m map[string]string) func(string) string {
+	return func(k string) string { return m[k] }
+}
+
+func TestLoad_Defaults(t *testing.T) {
+	s, err := config.Load("", env(map[string]string{"OMNISMITH_ACCESS_TOKEN": "omni_t", "OMNISMITH_PROJECT_ID": "p1"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Token != "omni_t" || s.ProjectID != "p1" || s.BaseURL != "https://api.omnismith.io/v1" {
+		t.Fatalf("settings: %+v", s)
+	}
+	if s.Mode != config.ModeApply || s.Overrides.HostTemplate != "" || s.HTTP.Timeout != 15*time.Second || s.HTTP.Retries != 3 {
+		t.Fatalf("defaults: %+v", s)
+	}
+	if s.Log.Level != "info" || s.Log.Format != "text" || len(s.Modules) != 0 {
+		t.Fatalf("defaults: %+v", s)
+	}
+}
+
+// FR-006…010: every knob from YAML; env wins for project/base URL; token only from env.
+func TestLoad_Full(t *testing.T) {
+	s, err := config.Load("testdata/full.yaml", env(map[string]string{"OMNISMITH_ACCESS_TOKEN": "omni_t"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.ProjectID != "01a0c47a-0000-7000-8000-000000000001" || s.BaseURL != "https://api.example.test/v1" {
+		t.Fatalf("ids: %+v", s)
+	}
+	if s.Mode != config.ModeVerify || s.Overrides.HostTemplate != "server" {
+		t.Fatalf("schema: %+v", s)
+	}
+	cpu := s.Overrides.Modules["cpu"]
+	if cpu.Template != "node" || cpu.Attributes["usage"].Slug != "cpu_usage" || cpu.Attributes["usage"].Template != "server" || cpu.Attributes["usage"].Name != "CPU %" || cpu.Attributes["usage"].Description != "Renamed by the operator" {
+		t.Fatalf("cpu override: %+v", cpu)
+	}
+	if on, ok := s.Modules["cpu"]; !ok || !on {
+		t.Fatalf("cpu switch: %v %v", on, ok)
+	}
+	if on, ok := s.Modules["disk"]; !ok || on {
+		t.Fatalf("disk switch: %v %v", on, ok)
+	}
+	if s.HTTP.Timeout != 5*time.Second || s.HTTP.Retries != 1 || s.Log.Level != "debug" || s.Log.Format != "json" {
+		t.Fatalf("http/log: %+v", s)
+	}
+
+	// env overrides file
+	s, err = config.Load("testdata/full.yaml", env(map[string]string{"OMNISMITH_ACCESS_TOKEN": "t", "OMNISMITH_PROJECT_ID": "p2", "OMNISMITH_BASE_URL": "http://localhost:8100"}))
+	if err != nil || s.ProjectID != "p2" || s.BaseURL != "http://localhost:8100" {
+		t.Fatalf("env precedence: %+v %v", s, err)
+	}
+}
+
+func TestLoad_Errors(t *testing.T) {
+	ok := env(map[string]string{"OMNISMITH_ACCESS_TOKEN": "t"})
+	tests := []struct {
+		name, path string
+		env        func(string) string
+		want       []string
+	}{
+		{"missing file", "testdata/nope.yaml", ok, []string{"nope.yaml"}},
+		{"unknown key", "testdata/unknown_key.yaml", ok, []string{"schmea"}},
+		{"token in file", "testdata/token_in_file.yaml", ok, []string{"access_token", "must not be in the config file"}},
+		{"invalid values", "testdata/invalid.yaml", ok, []string{`schema.mode "sometimes"`, `schema.host_template "Host Template"`, "http.timeout", "http.retries", `log.level "loud"`, `log.format "xml"`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.Load(tt.path, tt.env)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error should mention %q: %v", w, err)
+				}
+			}
+		})
+	}
+}
+
+// Missing token/project are not Load errors (version needs neither); the
+// caller asks for them when a command needs the API (IV: token only from env).
+func TestSettings_RequireAPI(t *testing.T) {
+	s, err := config.Load("testdata/minimal.yaml", env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RequireAPI(); err == nil || !strings.Contains(err.Error(), "OMNISMITH_ACCESS_TOKEN") {
+		t.Fatalf("want token error, got %v", err)
+	}
+	s, _ = config.Load("", env(map[string]string{"OMNISMITH_ACCESS_TOKEN": "t"}))
+	if err := s.RequireAPI(); err == nil || !strings.Contains(err.Error(), "OMNISMITH_PROJECT_ID") {
+		t.Fatalf("want project error, got %v", err)
+	}
+	s, _ = config.Load("", env(map[string]string{"OMNISMITH_ACCESS_TOKEN": "t", "OMNISMITH_PROJECT_ID": "p"}))
+	if err := s.RequireAPI(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The default config file is picked up when present and no path is given.
+func TestLoad_DefaultPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if _, err := config.Load("", env(nil)); err != nil {
+		t.Fatalf("no file, no path must be fine: %v", err)
+	}
+	if err := writeFile(dir+"/omnistat.yaml", "project_id: from_default_file\n"); err != nil {
+		t.Fatal(err)
+	}
+	s, err := config.Load("", env(nil))
+	if err != nil || s.ProjectID != "from_default_file" || s.Path != "omnistat.yaml" {
+		t.Fatalf("default path: %+v %v", s, err)
+	}
+}

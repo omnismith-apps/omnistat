@@ -11,8 +11,8 @@ build: ## Build ./bin/omnistat
 	@mkdir -p bin
 	go build -trimpath -ldflags '$(LDFLAGS)' -o bin/$(BINARY) ./cmd/$(BINARY)
 
-run: ## Run from source (ARGS="...")
-	go run ./cmd/$(BINARY) $(ARGS)
+run: ## Run from source: make run ARGS="schema plan" (sources ./.env if present)
+	@set -a; [ -f .env ] && . ./.env; set +a; go run ./cmd/$(BINARY) $(ARGS)
 
 test: ## Unit tests
 	go test ./...

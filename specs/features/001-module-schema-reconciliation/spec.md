@@ -1,7 +1,8 @@
 ---
 feature: 001-module-schema-reconciliation
-status: approved          # draft | review | approved | implemented | superseded
+status: implemented       # draft | review | approved | implemented | superseded
 approved: 2026-09-21
+implemented: 2026-09-22
 created: 2026-09-21
 owners: [evgenii]
 supersedes: null
@@ -249,6 +250,30 @@ Domain mapping of manifest kinds: `text`/`number`/`boolean`/`date`/`datetime` ar
 ## Open questions
 
 None.
+
+## Implementation notes (2026-09-22)
+
+Implemented per `plan.md`; `tasks.md` T001–T063 done. Deviations and findings:
+
+- `Desired` lives in `internal/manifest` (not `schema`) to avoid an import cycle;
+  the `API` interface is declared by `internal/schema` (its consumer) — see ADR-0003.
+- Existing attributes are bound via `PATCH /attributes/{id}` (attribute-side) —
+  see ADR-0002. After any bind, `Apply` performs one verification read and
+  re-diff (one call more than NFR-002's budget, only when a bind happened).
+- FR-027 pre-flight: the permission strings are undocumented, so the pre-flight
+  only surfaces hard 401/403 from `GET /auth/me/permissions`; real permission
+  errors are mapped from the write's 403 with guidance to use `verify` mode.
+- Sandbox acceptance (local API, project "Omnistat Test", token via `.env`):
+  US-1/1 `schema plan` → `+ template host`, exit 2, nothing written;
+  US-1/2 `schema apply` → template created (confirmed via discovery), exit 0;
+  US-1/3 `plan`/`apply`/`verify` again → "no changes" / "schema complete", exit 0.
+  The real build has no modules yet, so attributes/options/binds were exercised
+  only against the fake API; feature 002 re-runs acceptance with real attributes.
+- Found and fixed during acceptance: a 403 with code `project_access_denied`
+  (wrong project id) was explained as a permission problem; it now points at
+  `OMNISMITH_PROJECT_ID`.
+- `make run ARGS="schema plan"` sources `./.env` for local development; the
+  binary itself never reads `.env` (secrets come from the environment, IV).
 
 ## Review checklist
 - [x] No implementation details (packages, libraries, signatures)
