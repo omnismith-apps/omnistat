@@ -24,8 +24,9 @@ Working notes for agents. Verify against the OpenAPI contract (`openapi.yaml` in
 
 | operationId | Method & path | Notes |
 |-------------|---------------|-------|
-| `getProjectSchema` | `GET /discovery/project-schema` | Read current schema; diff against module manifests; resolve slugs → ids |
-| `createTemplate` / `patchTemplate` | `POST /templates`, `PATCH /templates/{id}` | Create missing templates / bind attributes. **`PATCH` with `attributes` replaces the whole association list** — send existing + new |
+| `getProjectSchema` | `GET /discovery/project-schema` | Read current schema; diff against module manifests; resolve slugs → ids. Attributes carry a semantic `type` string (`string, number, boolean, datetime, date, file, image, markdown, list, reference, metric`) and `options`; templates carry bound attribute ids/slugs |
+| `createTemplate` | `POST /templates` | Create missing templates (`attribute_ids`/`attribute_slugs` optional) |
+| `patchAttribute` | `PATCH /attributes/{id}` | **Bind an existing attribute to a template**: `template_ids` replaces *that attribute's* template list — send existing ∪ new. Preferred over `PATCH /templates/{id}` (which replaces the template's whole attribute list) for a smaller race window |
 | `createAttribute` / `setAttributeItems` / `createAttributeItem` | `POST /attributes`, `/attributes/{id}/items` | Create attributes (`attribute_type` 0 dim/1 metric/2 list/3 ref; `data_type` 0 string/1 number/2 bool/3 datetime/4 date; slug `[A-Za-z0-9_]`) and list options |
 | `getMyPermissions` | `GET /auth/me/permissions` | Pre-flight: can this token write schema? |
 | `searchEntities` | `POST /entities/search/{template_id}` | Find the existing host entity by its identity attribute (idempotency) |
