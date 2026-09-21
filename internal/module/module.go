@@ -117,3 +117,12 @@ func (s Static) Name() string { return s.M.Module }
 
 // Manifest implements Module.
 func (s Static) Manifest() manifest.Manifest { return s.M }
+
+// Get returns the registered module with the given name.
+func (r *Registry) Get(name string) (Module, bool) {
+	i, ok := r.index[name]
+	if !ok {
+		return nil, false
+	}
+	return r.entries[i].mod, true
+}

@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 ## [Unreleased]
 
 ### Added
+- `machine-id` module and `omnistat identity [--json]`: stable derived host identity (HMAC-SHA256 of the OS machine id, ADR-0004), static override via `identity.static` / `OMNISTAT_IDENTITY`, idempotent host-entity resolution (feature 002).
+- `make sandbox`: build-tagged tests against a real project.
 - `omnistat schema plan|apply|verify`: module manifests, YAML config with slug/template overrides, additive schema reconciliation with dry-run, conflict detection, fleet-race handling and JSON plan output (feature 001).
 - ADR-0002 (attribute-side binding), ADR-0003 (additive-only API interface).
 - Clear guidance when the token has no access to the configured project (`project_access_denied`).

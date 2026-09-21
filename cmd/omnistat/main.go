@@ -14,6 +14,7 @@ import (
 
 	"github.com/omnismith-apps/omnistat/internal/cli"
 	"github.com/omnismith-apps/omnistat/internal/module"
+	"github.com/omnismith-apps/omnistat/internal/module/machineid"
 )
 
 // version is set at build time via -ldflags "-X main.version=...".
@@ -27,10 +28,11 @@ func main() {
 	os.Exit(code)
 }
 
-// registry lists the modules compiled into this build. Feature 002 adds the
-// first real module (machine-id); until then the schema is the host template only.
+// registry lists the modules compiled into this build.
 func registry() *module.Registry {
-	return module.NewRegistry()
+	r := module.NewRegistry()
+	r.Register(machineid.New(), module.Required()) // spec 002 FR-002
+	return r
 }
 
 func resolveVersion() string {

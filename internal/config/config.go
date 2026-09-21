@@ -13,6 +13,7 @@ import (
 	"github.com/goccy/go-yaml"
 
 	"github.com/omnismith-apps/omnistat/internal/manifest"
+	"github.com/omnismith-apps/omnistat/internal/module/machineid"
 )
 
 // Environment variable names.
@@ -20,6 +21,8 @@ const (
 	EnvToken     = "OMNISMITH_ACCESS_TOKEN"
 	EnvProjectID = "OMNISMITH_PROJECT_ID"
 	EnvBaseURL   = "OMNISMITH_BASE_URL"
+	// EnvIdentity pins the host identity (spec 002 FR-009); wins over the file.
+	EnvIdentity = "OMNISTAT_IDENTITY"
 )
 
 // DefaultPath is the config file used when none is given and it exists.
@@ -53,6 +56,8 @@ type Settings struct {
 		Level  string
 		Format string
 	}
+	// Identity is the static host identity, "" for autodiscovery (spec 002).
+	Identity string
 }
 
 // RequireAPI checks that the settings can reach the API (token and project).
@@ -85,6 +90,9 @@ type file struct {
 		Level  string `yaml:"level"`
 		Format string `yaml:"format"`
 	} `yaml:"log"`
+	Identity struct {
+		Static string `yaml:"static"`
+	} `yaml:"identity"`
 }
 
 type moduleFile struct {
@@ -215,6 +223,17 @@ func Load(path string, getenv func(string) string) (Settings, error) {
 		default:
 			add("log.format %q must be text or json", f.Log.Format)
 		}
+	}
+	s.Identity = strings.TrimSpace(f.Identity.Static)
+	if v := strings.TrimSpace(getenv(EnvIdentity)); v != "" {
+		s.Identity = v
+	}
+	if s.Identity != "" {
+		if err := machineid.ValidateStatic(s.Identity); err != nil {
+			add("identity: %v", err)
+		}
+	} else if f.Identity.Static != "" || getenv(EnvIdentity) != "" {
+		add("identity: static identity is set but empty or whitespace")
 	}
 	if err := errors.Join(problems...); err != nil {
 		return s, fmt.Errorf("config: %w", err)

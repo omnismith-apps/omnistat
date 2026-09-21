@@ -7,7 +7,7 @@ publishes dimensions and ingests metrics. Slugs have stable defaults and can be
 remapped in config to fit an existing schema or marketplace blueprint.
 
 > Status: **early.** Developed spec-first — see [`specs/README.md`](specs/README.md).
-> Feature 001 (schema reconciliation) is implemented; feature 002 (host identity) is next.
+> Features 001 (schema reconciliation) and 002 (host identity) are implemented; 003 (publishing values and metrics) is next.
 
 ## Why
 
@@ -25,7 +25,12 @@ export OMNISMITH_PROJECT_ID=<project uuid>
 ./bin/omnistat schema plan                  # dry-run: what would be created (exit 2 = changes pending)
 ./bin/omnistat schema apply                 # create what is missing — additive only, never deletes
 ./bin/omnistat schema verify                # for hosts whose token cannot write the schema
+./bin/omnistat identity                     # this host's identity, its source, and the entity it maps to
 ```
+
+The host identity is derived from the OS machine id (`/etc/machine-id` on Linux,
+the platform UUID on macOS) as a keyed hash — the raw id is never published. Pin it
+for clones or containers with `OMNISTAT_IDENTITY=…` or `identity.static` in the config.
 
 Optional `omnistat.yaml` (picked up from the working directory, or `--config`):
 
@@ -39,6 +44,8 @@ modules:
     enabled: true
     attributes:
       usage: { slug: cpu_usage }   # fit an existing attribute
+identity:
+  static: rack7-node3    # optional: pin the identity instead of autodiscovering it
 http: { timeout: 15s, retries: 3 }
 log:  { level: info, format: text }
 ```

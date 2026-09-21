@@ -1,7 +1,8 @@
 ---
 feature: 002-host-identity
-status: approved          # draft | review | approved | implemented | superseded
+status: implemented       # draft | review | approved | implemented | superseded
 approved: 2026-09-21
+implemented: 2026-09-22
 created: 2026-09-21
 owners: [evgenii]
 supersedes: null
@@ -191,6 +192,25 @@ Write: one entity on the host template with `{ identity attribute: value }`.
 ## Open questions
 
 None.
+
+## Implementation notes (2026-09-22)
+
+Implemented per `plan.md`; `tasks.md` T001–T010 done. Findings:
+
+- FR-016 (resolve after reconciliation, before publishing) is exercised by the
+  `identity` command in dry-run; the writing path runs in feature 003's loop.
+  `identity.Resolve` itself is complete and sandbox-tested with writes.
+- Derivation pinned by golden vector; ADR-0004.
+- The macOS provider runs a fixed `ioreg` command (no cgo); parsing is guarded
+  by a fixture test only — not yet run on real macOS hardware.
+- Sandbox acceptance (local API, project "Omnistat Test"):
+  `schema apply` created `machine_id` bound to `host` (first real attribute
+  creation with `template_ids`); `identity` reported the derived id, source and
+  "none yet"; a build-tagged test (`make sandbox`) ran the real `Resolve`:
+  dry-run → create → reuse → exact match (prefix and superstring do not match,
+  confirming `eq` semantics); a duplicate created through the API made
+  `identity` warn and pick the oldest; the raw `/etc/machine-id` value appeared
+  nowhere in output or logs.
 
 ## Review checklist
 - [x] No implementation details (packages, libraries, signatures)

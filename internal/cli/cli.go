@@ -80,6 +80,8 @@ func (a *App) Run(ctx context.Context, args []string, stdout, stderr io.Writer, 
 		return ExitOK
 	case "schema":
 		return a.schema(e, rest[1:])
+	case "identity":
+		return a.identity(e, rest[1:])
 	case "help", "-h", "--help":
 		a.usage(stdout, fs)
 		return ExitOK
@@ -100,6 +102,7 @@ Commands:
   schema plan [--json]   show what reconciliation would create (exit 0 none, 2 pending, 1 conflict/error)
   schema apply           create what is missing (additive only)
   schema verify          fail if anything is missing; write nothing
+  identity [--json]      show this host's identity, its source and the entity it resolves to; write nothing
   version                print the version
   help                   this text
 
@@ -110,7 +113,7 @@ Global flags:
 	fs.PrintDefaults()
 	fs.SetOutput(prev)
 	fmt.Fprintf(w, "\nModules in this build: %s\n", strings.Join(a.Registry.Names(), ", "))
-	fmt.Fprintf(w, "Environment: %s (required), %s, %s\n", config.EnvToken, config.EnvProjectID, config.EnvBaseURL)
+	fmt.Fprintf(w, "Environment: %s (required), %s, %s, %s\n", config.EnvToken, config.EnvProjectID, config.EnvBaseURL, config.EnvIdentity)
 }
 
 // fail prints an error for humans and returns ExitError.

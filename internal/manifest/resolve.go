@@ -195,3 +195,13 @@ func Resolve(manifests []Manifest, ov Overrides) (Desired, error) {
 	sort.Slice(d.Attributes, func(i, j int) bool { return d.Attributes[i].Slug < d.Attributes[j].Slug })
 	return d, nil
 }
+
+// Find returns the desired attribute declared by module/key, after overrides.
+func (d Desired) Find(module, key string) (DesiredAttribute, bool) {
+	for _, a := range d.Attributes {
+		if a.Module == module && a.Key == key {
+			return a, true
+		}
+	}
+	return DesiredAttribute{}, false
+}

@@ -3,7 +3,7 @@ MODULE   := github.com/omnismith-apps/omnistat
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 
-.PHONY: all build run test test-race lint vet fmt tidy specs-check clean help
+.PHONY: all build run test test-race lint vet fmt tidy sandbox specs-check clean help
 
 all: fmt vet lint test build ## Full local gate (same as CI)
 
@@ -32,6 +32,9 @@ fmt: ## gofmt check (fails on unformatted files)
 tidy: ## go mod tidy and verify
 	go mod tidy
 	go mod verify
+
+sandbox: ## Run build-tagged tests against a real project (sources ./.env; creates entities, never deletes)
+	@set -a; [ -f .env ] && . ./.env; set +a; go test -tags sandbox -run 'TestSandbox' -v ./... 2>&1 | grep -vE '^(=== RUN|\?|ok )'
 
 specs-check: ## Validate spec folder structure and frontmatter
 	./scripts/check-specs.sh

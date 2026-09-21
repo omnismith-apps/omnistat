@@ -123,3 +123,36 @@ func TestLoad_DefaultPath(t *testing.T) {
 		t.Fatalf("default path: %+v %v", s, err)
 	}
 }
+
+// Spec 002 FR-008/009: static identity from file, env wins, validation.
+func TestLoad_Identity(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/id.yaml"
+	if err := writeFile(path, "identity:\n  static: \"  rack7-node3 \"\n"); err != nil {
+		t.Fatal(err)
+	}
+	s, err := config.Load(path, env(nil))
+	if err != nil || s.Identity != "rack7-node3" {
+		t.Fatalf("file: %q %v", s.Identity, err)
+	}
+	s, err = config.Load(path, env(map[string]string{"OMNISTAT_IDENTITY": "from-env"}))
+	if err != nil || s.Identity != "from-env" {
+		t.Fatalf("env wins: %q %v", s.Identity, err)
+	}
+	s, err = config.Load("", env(nil))
+	if err != nil || s.Identity != "" {
+		t.Fatalf("default: %q %v", s.Identity, err)
+	}
+	if _, err := config.Load("", env(map[string]string{"OMNISTAT_IDENTITY": "   "})); err == nil || !strings.Contains(err.Error(), "identity") {
+		t.Fatalf("whitespace env: %v", err)
+	}
+	if err := writeFile(path, "identity:\n  static: \" \"\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(path, env(nil)); err == nil || !strings.Contains(err.Error(), "identity") {
+		t.Fatalf("whitespace file: %v", err)
+	}
+	if _, err := config.Load("", env(map[string]string{"OMNISTAT_IDENTITY": strings.Repeat("x", 129)})); err == nil || !strings.Contains(err.Error(), "maximum is 128") {
+		t.Fatalf("too long: %v", err)
+	}
+}
