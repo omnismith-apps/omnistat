@@ -25,8 +25,9 @@ Working notes for agents. Verify against the OpenAPI contract (`openapi.yaml` in
 | operationId | Method & path | Notes |
 |-------------|---------------|-------|
 | `getProjectSchema` | `GET /discovery/project-schema` | Read current schema; diff against module manifests; resolve slugs → ids |
-| `createTemplate` / `patchTemplate` | `POST /templates`, `PATCH /templates/{id}` | Create missing templates / bind attributes |
-| `createAttribute` / `setAttributeItems` | `POST /attributes`, list items | Create missing attributes and list options |
+| `createTemplate` / `patchTemplate` | `POST /templates`, `PATCH /templates/{id}` | Create missing templates / bind attributes. **`PATCH` with `attributes` replaces the whole association list** — send existing + new |
+| `createAttribute` / `setAttributeItems` / `createAttributeItem` | `POST /attributes`, `/attributes/{id}/items` | Create attributes (`attribute_type` 0 dim/1 metric/2 list/3 ref; `data_type` 0 string/1 number/2 bool/3 datetime/4 date; slug `[A-Za-z0-9_]`) and list options |
+| `getMyPermissions` | `GET /auth/me/permissions` | Pre-flight: can this token write schema? |
 | `searchEntities` | `POST /entities/search/{template_id}` | Find the existing host entity by its identity attribute (idempotency) |
 | `createEntity` | `POST /entities/template/{template}` | Publish dimensions |
 | `updateEntity` | `PATCH /entities/{id}` | Partial dimension update (`last_check_at`, status) |
@@ -48,5 +49,6 @@ Working notes for agents. Verify against the OpenAPI contract (`openapi.yaml` in
 
 - Plain scalars for dimensions; `null` clears. Backfill with
   `{ "value": …, "updated_at": "RFC3339 with offset" }`.
+- Metric observations are sent as **strings** (`"value": "24.5"`), optional `updated_at`.
 - Metric attributes reject `replace`; `create`/`update` append one observation, the
   metrics endpoint is for many observations or explicit timestamps.
