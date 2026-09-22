@@ -7,7 +7,8 @@ publishes dimensions and ingests metrics. Slugs have stable defaults and can be
 remapped in config to fit an existing schema or marketplace blueprint.
 
 > Status: **early.** Developed spec-first — see [`specs/README.md`](specs/README.md).
-> Features 001 (schema reconciliation) and 002 (host identity) are implemented; 003 (publishing values and metrics) is next.
+> Features 001 (schema reconciliation), 002 (host identity) and 003 (run loop, publisher,
+> `hostname` module) are implemented; the next specs add value modules (`ip-address`, `cpu`, …).
 
 ## Why
 
@@ -26,7 +27,16 @@ export OMNISMITH_PROJECT_ID=<project uuid>
 ./bin/omnistat schema apply                 # create what is missing — additive only, never deletes
 ./bin/omnistat schema verify                # for hosts whose token cannot write the schema
 ./bin/omnistat identity                     # this host's identity, its source, and the entity it maps to
+./bin/omnistat run --dry-run                # what would be published, without writing (add --json for a script)
+./bin/omnistat run                          # reconcile → resolve the host entity → collect every module → publish, once
+./bin/omnistat run --daemon                 # keep going: modules on their own cadence, one publish per interval
 ```
+
+`run` exits 0 when everything was published, 2 when some module failed to collect
+(the rest was still published), 1 on error. The daemon publishes right after the first
+collection, then every `publish.interval`; on SIGTERM/SIGINT it publishes what is
+buffered and exits 0. Observations are stamped when collected, so a network outage only
+delays them (the buffer holds up to 5 000 observations per metric).
 
 The host identity is derived from the OS machine id (`/etc/machine-id` on Linux,
 the platform UUID on macOS) as a keyed hash — the raw id is never published. Pin it
@@ -39,7 +49,11 @@ project_id: 01a0c47a-...
 schema:
   mode: apply            # apply | verify | off
   host_template: server  # remap the default `host` template to an existing one
+publish:
+  interval: 60s          # how often the daemon publishes (1s–1h)
 modules:
+  hostname:
+    interval: 5m         # per-module collection cadence (1s–24h; default from the module)
   cpu:
     enabled: true
     attributes:

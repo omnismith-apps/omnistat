@@ -10,6 +10,7 @@ import (
 
 	omnismithsdk "github.com/omnismith-sdk/go"
 
+	"github.com/omnismith-apps/omnistat/internal/publish"
 	"github.com/omnismith-apps/omnistat/internal/schema"
 )
 
@@ -74,15 +75,18 @@ func (e *APIError) Is(target error) bool {
 		return e.Status == http.StatusForbidden
 	case ErrNoProject:
 		return e.Status == http.StatusConflict && e.Code == "no_project_selected"
-	case ErrNotFound:
+	case ErrNotFound, publish.ErrNotFound:
 		return e.Status == http.StatusNotFound
-	case ErrValidation:
+	case ErrValidation, publish.ErrRejected:
 		return e.Status == http.StatusUnprocessableEntity
 	case schema.ErrAlreadyExists:
 		return e.alreadyExists()
 	}
 	return false
 }
+
+// RejectedFields implements publish.Rejected.
+func (e *APIError) RejectedFields() map[string][]string { return e.Fields }
 
 // alreadyExists recognises "this slug/value is taken" answers: a 409 that is
 // not the no-project code, or a 422 whose field errors mention "taken".

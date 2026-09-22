@@ -28,6 +28,15 @@ const (
 // DefaultPath is the config file used when none is given and it exists.
 const DefaultPath = "omnistat.yaml"
 
+// Interval bounds (spec 003 FR-003, FR-013).
+const (
+	DefaultPublishInterval = 60 * time.Second
+	MinPublishInterval     = time.Second
+	MaxPublishInterval     = time.Hour
+	MinModuleInterval      = time.Second
+	MaxModuleInterval      = 24 * time.Hour
+)
+
 // Mode is the reconciliation mode (FR-010).
 type Mode string
 
@@ -48,7 +57,12 @@ type Settings struct {
 	Overrides manifest.Overrides
 	// Modules holds explicit on/off switches (absent = module default).
 	Modules map[string]bool
-	HTTP    struct {
+	// Intervals holds per-module collection intervals (absent = provider
+	// default; spec 003 FR-003).
+	Intervals map[string]time.Duration
+	// PublishInterval is how often the daemon publishes (spec 003 FR-013).
+	PublishInterval time.Duration
+	HTTP            struct {
 		Timeout time.Duration
 		Retries int
 	}
@@ -82,7 +96,10 @@ type file struct {
 		HostTemplate string `yaml:"host_template"`
 	} `yaml:"schema"`
 	Modules map[string]moduleFile `yaml:"modules"`
-	HTTP    struct {
+	Publish struct {
+		Interval string `yaml:"interval"`
+	} `yaml:"publish"`
+	HTTP struct {
 		Timeout string `yaml:"timeout"`
 		Retries *int   `yaml:"retries"`
 	} `yaml:"http"`
@@ -97,6 +114,7 @@ type file struct {
 
 type moduleFile struct {
 	Enabled    *bool                    `yaml:"enabled"`
+	Interval   string                   `yaml:"interval"`
 	Template   string                   `yaml:"template"`
 	Attributes map[string]attributeFile `yaml:"attributes"`
 }
@@ -114,6 +132,8 @@ type attributeFile struct {
 func Load(path string, getenv func(string) string) (Settings, error) {
 	var s Settings
 	s.Modules = map[string]bool{}
+	s.Intervals = map[string]time.Duration{}
+	s.PublishInterval = DefaultPublishInterval
 	s.BaseURL = "https://api.omnismith.io/v1"
 	s.Mode = ModeApply
 	s.HTTP.Timeout = 15 * time.Second
@@ -180,6 +200,13 @@ func Load(path string, getenv func(string) string) (Settings, error) {
 		if mf.Enabled != nil {
 			s.Modules[name] = *mf.Enabled
 		}
+		if mf.Interval != "" {
+			if d, err := parseInterval(mf.Interval, MinModuleInterval, MaxModuleInterval); err != nil {
+				add("modules.%s.interval: %v", name, err)
+			} else {
+				s.Intervals[name] = d
+			}
+		}
 		mo := manifest.ModuleOverride{Template: mf.Template}
 		if len(mf.Attributes) > 0 {
 			mo.Attributes = map[string]manifest.AttributeOverride{}
@@ -190,6 +217,13 @@ func Load(path string, getenv func(string) string) (Settings, error) {
 		s.Overrides.Modules[name] = mo
 	}
 
+	if f.Publish.Interval != "" {
+		if d, err := parseInterval(f.Publish.Interval, MinPublishInterval, MaxPublishInterval); err != nil {
+			add("publish.interval: %v", err)
+		} else {
+			s.PublishInterval = d
+		}
+	}
 	if f.HTTP.Timeout != "" {
 		d, err := time.ParseDuration(f.HTTP.Timeout)
 		switch {
@@ -239,4 +273,16 @@ func Load(path string, getenv func(string) string) (Settings, error) {
 		return s, fmt.Errorf("config: %w", err)
 	}
 	return s, nil
+}
+
+// parseInterval parses a duration and checks it against [lo, hi].
+func parseInterval(v string, lo, hi time.Duration) (time.Duration, error) {
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("%q: %w", v, err)
+	}
+	if d < lo || d > hi {
+		return 0, fmt.Errorf("%s is outside %s…%s", d, lo, hi)
+	}
+	return d, nil
 }

@@ -26,6 +26,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if s.Log.Level != "info" || s.Log.Format != "text" || len(s.Modules) != 0 {
 		t.Fatalf("defaults: %+v", s)
 	}
+	if s.PublishInterval != 60*time.Second || len(s.Intervals) != 0 {
+		t.Fatalf("interval defaults: %+v", s)
+	}
 }
 
 // FR-006…010: every knob from YAML; env wins for project/base URL; token only from env.
@@ -53,6 +56,10 @@ func TestLoad_Full(t *testing.T) {
 	if s.HTTP.Timeout != 5*time.Second || s.HTTP.Retries != 1 || s.Log.Level != "debug" || s.Log.Format != "json" {
 		t.Fatalf("http/log: %+v", s)
 	}
+	// Spec 003 FR-003/FR-013: intervals.
+	if s.PublishInterval != 30*time.Second || s.Intervals["hostname"] != 10*time.Minute || len(s.Intervals) != 1 {
+		t.Fatalf("intervals: %+v", s)
+	}
 
 	// env overrides file
 	s, err = config.Load("testdata/full.yaml", env(map[string]string{"OMNISMITH_ACCESS_TOKEN": "t", "OMNISMITH_PROJECT_ID": "p2", "OMNISMITH_BASE_URL": "http://localhost:8100"}))
@@ -71,7 +78,8 @@ func TestLoad_Errors(t *testing.T) {
 		{"missing file", "testdata/nope.yaml", ok, []string{"nope.yaml"}},
 		{"unknown key", "testdata/unknown_key.yaml", ok, []string{"schmea"}},
 		{"token in file", "testdata/token_in_file.yaml", ok, []string{"access_token", "must not be in the config file"}},
-		{"invalid values", "testdata/invalid.yaml", ok, []string{`schema.mode "sometimes"`, `schema.host_template "Host Template"`, "http.timeout", "http.retries", `log.level "loud"`, `log.format "xml"`}},
+		{"invalid values", "testdata/invalid.yaml", ok, []string{`schema.mode "sometimes"`, `schema.host_template "Host Template"`, "http.timeout", "http.retries", `log.level "loud"`, `log.format "xml"`,
+			"publish.interval: 2h0m0s is outside 1s…1h0m0s", "modules.cpu.interval: 500ms is outside 1s…24h0m0s", `modules.ram.interval: "soon"`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

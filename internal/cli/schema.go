@@ -16,6 +16,7 @@ import (
 // schema, a client and the current schema.
 type prepared struct {
 	settings config.Settings
+	modules  []module.Module
 	desired  manifest.Desired
 	api      *omni.Client
 	current  schema.Current
@@ -33,6 +34,16 @@ func (a *App) prepare(e env) (prepared, error) {
 
 // prepareWith is prepare for already-loaded settings.
 func (a *App) prepareWith(e env, s config.Settings) (prepared, error) {
+	p, err := a.prepareLocal(e, s)
+	if err != nil {
+		return p, err
+	}
+	return p, p.readSchema(e)
+}
+
+// prepareLocal does everything that needs no network: modules, manifests,
+// desired schema, client construction.
+func (a *App) prepareLocal(e env, s config.Settings) (prepared, error) {
 	var p prepared
 	if err := s.RequireAPI(); err != nil {
 		return p, err
@@ -56,11 +67,17 @@ func (a *App) prepareWith(e env, s config.Settings) (prepared, error) {
 	if err != nil {
 		return p, err
 	}
-	cur, err := api.ReadSchema(e.ctx)
+	return prepared{settings: s, modules: mods, desired: desired, api: api}, nil
+}
+
+// readSchema performs the one schema read (NFR-002).
+func (p *prepared) readSchema(e env) error {
+	cur, err := p.api.ReadSchema(e.ctx)
 	if err != nil {
-		return p, explain(err)
+		return explain(err)
 	}
-	return prepared{settings: s, desired: desired, api: api, current: cur}, nil
+	p.current = cur
+	return nil
 }
 
 // explain turns well-known API errors into operator guidance.

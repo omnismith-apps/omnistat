@@ -60,7 +60,9 @@ func Apply(ctx context.Context, api API, desired manifest.Desired, cur Current, 
 	}
 	res.Resolved = resolvedFrom(cur)
 	remaining := plan.Actions
-	bound := false
+	// A re-read is due after binds (verification, below) and after list
+	// options were added, whose item ids only discovery reports (spec 003 FR-012a).
+	reread := false
 
 	for len(remaining) > 0 {
 		a := remaining[0]
@@ -68,7 +70,7 @@ func Apply(ctx context.Context, api API, desired manifest.Desired, cur Current, 
 		err := execute(ctx, api, a, &res.Resolved)
 		if err == nil {
 			res.Done = append(res.Done, ActionResult{Action: a})
-			bound = bound || a.Type == BindAttribute
+			reread = reread || a.Type == BindAttribute || a.Type == AddListOption
 			log.Info("schema action applied", "action", a.Type.String(), "module", a.Module, "attribute", a.Attribute, "template", a.Template, "option", a.Option)
 			continue
 		}
@@ -101,7 +103,8 @@ func Apply(ctx context.Context, api API, desired manifest.Desired, cur Current, 
 
 	// Binds are read-modify-write on the attribute side; verify once after
 	// them so a binding lost to a concurrent bind is redone (plan risk note).
-	if bound {
+	// The same read refreshes Resolved with newly created list item ids.
+	if reread {
 		fresh, err := api.ReadSchema(ctx)
 		if err != nil {
 			return res, fmt.Errorf("verify schema: %w", err)
@@ -211,12 +214,19 @@ func exists(cur Current, a Action) bool {
 }
 
 func resolvedFrom(cur Current) Resolved {
-	r := Resolved{Templates: map[string]string{}, Attributes: map[string]string{}}
+	r := Resolved{Templates: map[string]string{}, Attributes: map[string]string{}, ListItems: map[string]map[string]string{}}
 	for slug, t := range cur.Templates {
 		r.Templates[slug] = t.ID
 	}
 	for slug, a := range cur.Attributes {
 		r.Attributes[slug] = a.ID
+		if len(a.OptionIDs) > 0 {
+			items := make(map[string]string, len(a.OptionIDs))
+			for v, id := range a.OptionIDs {
+				items[v] = id
+			}
+			r.ListItems[slug] = items
+		}
 	}
 	return r
 }

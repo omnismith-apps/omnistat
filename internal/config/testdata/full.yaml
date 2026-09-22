@@ -16,6 +16,10 @@ modules:
         description: Renamed by the operator
   disk:
     enabled: false
+  hostname:
+    interval: 10m
+publish:
+  interval: 30s
 http:
   timeout: 5s
   retries: 1

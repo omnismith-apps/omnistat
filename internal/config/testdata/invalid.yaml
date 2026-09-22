@@ -1,4 +1,11 @@
 project_id: 01a0c47a-0000-7000-8000-000000000001
+publish:
+  interval: 2h
+modules:
+  cpu:
+    interval: 500ms
+  ram:
+    interval: soon
 schema:
   mode: sometimes
   host_template: "Host Template"

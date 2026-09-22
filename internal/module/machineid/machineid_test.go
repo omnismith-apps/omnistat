@@ -8,6 +8,7 @@ import (
 	"testing/fstest"
 
 	"github.com/omnismith-apps/omnistat/internal/manifest"
+	"github.com/omnismith-apps/omnistat/internal/module"
 	"github.com/omnismith-apps/omnistat/internal/module/machineid"
 )
 
@@ -163,5 +164,12 @@ func TestValidateStatic(t *testing.T) {
 	}
 	if err := machineid.ValidateStatic(strings.Repeat("x", 128)); err != nil {
 		t.Fatalf("128 chars must be fine: %v", err)
+	}
+}
+
+// Spec 003 FR-005: the identity module produces no periodic values.
+func TestNotAProvider(t *testing.T) {
+	if _, ok := module.ProviderOf(machineid.New()); ok {
+		t.Fatal("machine-id must not implement module.Provider")
 	}
 }

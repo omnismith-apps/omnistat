@@ -100,6 +100,10 @@ func (c *Client) ReadSchema(ctx context.Context) (schema.Current, error) {
 		ca := schema.CurrentAttribute{ID: a.GetId(), Slug: slug, Name: a.GetName(), Type: a.GetType()}
 		for _, o := range a.GetOptions() {
 			ca.Options = append(ca.Options, o.GetValue())
+			if ca.OptionIDs == nil {
+				ca.OptionIDs = map[string]string{}
+			}
+			ca.OptionIDs[o.GetValue()] = o.GetId()
 		}
 		cur.Attributes[slug] = ca
 	}

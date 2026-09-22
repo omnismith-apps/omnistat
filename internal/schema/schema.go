@@ -34,6 +34,8 @@ type CurrentAttribute struct {
 	Name    string
 	Type    string
 	Options []string
+	// OptionIDs maps a list option's value to its item id (spec 003 FR-012a).
+	OptionIDs map[string]string
 }
 
 // TypeOf maps a manifest kind to discovery's semantic type string (FR-014/015).
@@ -126,7 +128,14 @@ type Plan struct {
 func (p Plan) Empty() bool { return len(p.Actions) == 0 && len(p.Conflicts) == 0 }
 
 // Resolved maps desired slugs to platform ids after reconciliation (FR-025).
+// ListItems maps attribute slug → option value → list item id, which the
+// publisher needs to write list values (spec 003 FR-012a).
 type Resolved struct {
 	Templates  map[string]string
 	Attributes map[string]string
+	ListItems  map[string]map[string]string
 }
+
+// ResolvedFrom builds the id maps from a current schema, for callers that
+// verified the schema without applying (spec 003 FR-022).
+func ResolvedFrom(cur Current) Resolved { return resolvedFrom(cur) }

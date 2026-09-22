@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -145,4 +146,166 @@ func (s *Server) createEntity(w http.ResponseWriter, templateRef string, body []
 	}
 	id := s.addEntityLocked(t.Slug, req.Attributes, "")
 	writeJSON(w, 201, map[string]any{"id": id})
+}
+
+// EntityValues returns an entity's current dimension values (slug → value),
+// or nil when it does not exist.
+func (s *Server) EntityValues(id string) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entityByID(id)
+	if e == nil {
+		return nil
+	}
+	out := make(map[string]any, len(e.Values))
+	for k, v := range e.Values {
+		out[k] = v
+	}
+	return out
+}
+
+// EntityHistory returns every dimension write an entity received, in order.
+func (s *Server) EntityHistory(id string) []Write {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.entityByID(id); e != nil {
+		return append([]Write(nil), e.History...)
+	}
+	return nil
+}
+
+// EntityMetrics returns the observations ingested for an entity, per slug.
+func (s *Server) EntityMetrics(id string) map[string][]Observation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entityByID(id)
+	if e == nil {
+		return nil
+	}
+	out := make(map[string][]Observation, len(e.Metrics))
+	for k, v := range e.Metrics {
+		out[k] = append([]Observation(nil), v...)
+	}
+	return out
+}
+
+func (s *Server) entityByID(id string) *entity {
+	for _, e := range s.entities {
+		if e.ID == id {
+			return e
+		}
+	}
+	return nil
+}
+
+// updateEntity is PATCH /entities/{id}: partial update, scalar or backfill
+// object per attribute; 404 unknown entity; 422 unknown attribute or bad
+// updated_at; 422 metric attribute in a dimension write is allowed by the
+// platform but not modelled here.
+func (s *Server) updateEntity(w http.ResponseWriter, id string, body []byte) {
+	e := s.entityByID(id)
+	if e == nil {
+		problem(w, 404, "Not Found", "entity not found", "")
+		return
+	}
+	var req struct {
+		Attributes map[string]json.RawMessage `json:"attributes"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil || len(req.Attributes) == 0 {
+		problem(w, 400, "Bad Request", "attributes required", "")
+		return
+	}
+	errs := map[string][]string{}
+	writes := map[string]Write{}
+	for slug, raw := range req.Attributes {
+		if s.attrBySlug(slug) == nil {
+			errs["attributes."+slug] = []string{"Unknown attribute."}
+			continue
+		}
+		var backfill struct {
+			Value     any     `json:"value"`
+			UpdatedAt *string `json:"updated_at"`
+		}
+		var value any
+		var at string
+		if json.Unmarshal(raw, &backfill) == nil && strings.HasPrefix(strings.TrimSpace(string(raw)), "{") {
+			value = backfill.Value
+			if backfill.UpdatedAt != nil {
+				if _, err := time.Parse(time.RFC3339, *backfill.UpdatedAt); err != nil {
+					errs["attributes."+slug] = []string{"updated_at must be RFC 3339."}
+					continue
+				}
+				at = *backfill.UpdatedAt
+			}
+		} else if err := json.Unmarshal(raw, &value); err != nil {
+			errs["attributes."+slug] = []string{"Invalid value."}
+			continue
+		}
+		writes[slug] = Write{Slug: slug, Value: value, UpdatedAt: at}
+	}
+	if len(errs) > 0 {
+		validation(w, errs)
+		return
+	}
+	for slug, wr := range writes {
+		e.Values[slug] = wr.Value
+		e.History = append(e.History, wr)
+	}
+	writeJSON(w, 200, map[string]any{"id": e.ID, "template_id": e.TemplateID, "attribute_values": e.Values})
+}
+
+// ingestMetrics is POST /entities/{id}/metrics: records observations, 202.
+func (s *Server) ingestMetrics(w http.ResponseWriter, id string, body []byte) {
+	e := s.entityByID(id)
+	if e == nil {
+		problem(w, 404, "Not Found", "entity not found", "")
+		return
+	}
+	var req struct {
+		MetricValues []struct {
+			AttributeSlug string  `json:"attribute_slug"`
+			AttributeID   string  `json:"attribute_id"`
+			Value         string  `json:"value"`
+			UpdatedAt     *string `json:"updated_at"`
+		} `json:"metric_values"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		problem(w, 400, "Bad Request", "invalid payload", "")
+		return
+	}
+	errs := map[string][]string{}
+	for i, mv := range req.MetricValues {
+		slug := mv.AttributeSlug
+		if slug == "" {
+			if a := s.attrByID(mv.AttributeID); a != nil {
+				slug = a.Slug
+			}
+		}
+		a := s.attrBySlug(slug)
+		switch {
+		case a == nil:
+			errs[fmt.Sprintf("metric_values.%d", i)] = []string{"Unknown attribute."}
+		case a.AttributeType != 1:
+			errs[fmt.Sprintf("metric_values.%d", i)] = []string{"Not a metric attribute."}
+		}
+	}
+	if len(errs) > 0 {
+		validation(w, errs)
+		return
+	}
+	if e.Metrics == nil {
+		e.Metrics = map[string][]Observation{}
+	}
+	for _, mv := range req.MetricValues {
+		slug := mv.AttributeSlug
+		if slug == "" {
+			slug = s.attrByID(mv.AttributeID).Slug
+		}
+		at := ""
+		if mv.UpdatedAt != nil {
+			at = *mv.UpdatedAt
+		}
+		e.Metrics[slug] = append(e.Metrics[slug], Observation{Value: mv.Value, UpdatedAt: at})
+	}
+	w.WriteHeader(202)
 }

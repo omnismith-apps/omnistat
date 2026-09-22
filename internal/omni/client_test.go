@@ -51,6 +51,13 @@ func TestReadSchema(t *testing.T) {
 	if a := cur.Attributes["cpu_arch"]; a.Type != "list" || strings.Join(a.Options, ",") != "amd64,arm64" || a.ID != h.AttributeIDs[0] {
 		t.Fatalf("cpu_arch: %+v", a)
 	}
+	// Spec 003 FR-012a: list item ids round-trip from discovery.
+	if want := srv.Attributes()[0].OptionIDs; len(want) != 2 || cur.Attributes["cpu_arch"].OptionIDs["arm64"] != want["arm64"] || want["arm64"] == "" {
+		t.Fatalf("option ids: got %v want %v", cur.Attributes["cpu_arch"].OptionIDs, want)
+	}
+	if cur.Attributes["nickname"].OptionIDs != nil {
+		t.Fatal("non-list attribute must have no option ids")
+	}
 	if cur.Attributes["cpu_usage"].Type != "metric" || cur.Attributes["nickname"].Type != "string" {
 		t.Fatalf("types: %+v", cur.Attributes)
 	}

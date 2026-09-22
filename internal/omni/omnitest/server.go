@@ -76,6 +76,23 @@ type entity struct {
 	ID, TemplateID string
 	Values         map[string]any // attribute slug → value
 	CreatedAt      string
+	// History records every dimension write as (slug, value, updated_at).
+	History []Write
+	// Metrics records ingested observations per attribute slug.
+	Metrics map[string][]Observation
+}
+
+// Write is one recorded dimension write.
+type Write struct {
+	Slug      string
+	Value     any
+	UpdatedAt string
+}
+
+// Observation is one recorded metric observation.
+type Observation struct {
+	Value     string
+	UpdatedAt string
 }
 
 // New starts a fake server with the default token, project id and full permissions.
@@ -180,6 +197,8 @@ type TemplateSnapshot struct {
 type AttributeSnapshot struct {
 	ID, Slug, Name, Type string
 	Options              []string
+	// OptionIDs maps option value → item id.
+	OptionIDs map[string]string
 }
 
 // Templates returns all templates, in creation order.
@@ -208,6 +227,10 @@ func (s *Server) Attributes() []AttributeSnapshot {
 		snap := AttributeSnapshot{ID: a.ID, Slug: a.Slug, Name: a.Name, Type: enumsToType(a.AttributeType, a.DataType)}
 		for _, o := range a.Options {
 			snap.Options = append(snap.Options, o.Value)
+			if snap.OptionIDs == nil {
+				snap.OptionIDs = map[string]string{}
+			}
+			snap.OptionIDs[o.Value] = o.ID
 		}
 		out = append(out, snap)
 	}
@@ -280,6 +303,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.searchEntities(w, strings.TrimPrefix(path, "/entities/search/"), body)
 	case r.Method == "POST" && strings.HasPrefix(path, "/entities/template/"):
 		s.createEntity(w, strings.TrimPrefix(path, "/entities/template/"), body)
+	case r.Method == "POST" && strings.HasPrefix(path, "/entities/") && strings.HasSuffix(path, "/metrics"):
+		s.ingestMetrics(w, strings.TrimSuffix(strings.TrimPrefix(path, "/entities/"), "/metrics"), body)
+	case r.Method == "PATCH" && strings.HasPrefix(path, "/entities/"):
+		s.updateEntity(w, strings.TrimPrefix(path, "/entities/"), body)
 	default:
 		problem(w, 404, "Not Found", "no such route in omnitest: "+r.Method+" "+path, "")
 	}

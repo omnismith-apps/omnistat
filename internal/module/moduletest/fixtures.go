@@ -2,9 +2,41 @@
 package moduletest
 
 import (
+	"context"
+	"time"
+
 	"github.com/omnismith-apps/omnistat/internal/manifest"
 	"github.com/omnismith-apps/omnistat/internal/module"
 )
+
+// Provided is a Static module with a provider whose behaviour tests script
+// (spec 003). Fn and Interval may be left nil/zero.
+type Provided struct {
+	module.Static
+	Interval time.Duration
+	Fn       func(ctx context.Context) ([]module.Observation, error)
+}
+
+// Collect implements module.Provider via Fn; a nil Fn yields nothing.
+func (p Provided) Collect(ctx context.Context) ([]module.Observation, error) {
+	if p.Fn == nil {
+		return nil, nil
+	}
+	return p.Fn(ctx)
+}
+
+// DefaultInterval implements module.Provider; zero means one minute.
+func (p Provided) DefaultInterval() time.Duration {
+	if p.Interval == 0 {
+		return time.Minute
+	}
+	return p.Interval
+}
+
+// WithProvider wraps a Static module with a scripted provider.
+func WithProvider(m module.Module, interval time.Duration, collect func(ctx context.Context) ([]module.Observation, error)) Provided {
+	return Provided{Static: module.Static{M: m.Manifest()}, Interval: interval, Fn: collect}
+}
 
 // CPU is a fixture with a text, a metric and a list attribute on the host template.
 func CPU() module.Module {

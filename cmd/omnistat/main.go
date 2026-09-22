@@ -14,6 +14,7 @@ import (
 
 	"github.com/omnismith-apps/omnistat/internal/cli"
 	"github.com/omnismith-apps/omnistat/internal/module"
+	"github.com/omnismith-apps/omnistat/internal/module/hostname"
 	"github.com/omnismith-apps/omnistat/internal/module/machineid"
 )
 
@@ -22,6 +23,13 @@ var version = "dev"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// The first signal cancels ctx (the daemon then flushes and exits, spec 003
+	// FR-020); releasing the handler right away lets a second signal terminate
+	// the process through the default action.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
 	app := &cli.App{Registry: registry(), Version: resolveVersion()}
 	code := app.Run(ctx, os.Args[1:], os.Stdout, os.Stderr, os.Getenv)
 	stop()
@@ -32,6 +40,7 @@ func main() {
 func registry() *module.Registry {
 	r := module.NewRegistry()
 	r.Register(machineid.New(), module.Required()) // spec 002 FR-002
+	r.Register(hostname.New())                     // spec 003 FR-023
 	return r
 }
 

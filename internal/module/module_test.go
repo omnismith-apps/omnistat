@@ -1,8 +1,10 @@
 package module_test
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/omnismith-apps/omnistat/internal/manifest"
 	"github.com/omnismith-apps/omnistat/internal/module"
@@ -60,5 +62,32 @@ func TestFixturesValidate(t *testing.T) {
 	mods, _ := moduletest.Registry().Enabled(map[string]bool{"disk": true})
 	if err := manifest.Validate(module.Manifests(mods)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Spec 003 FR-001: a provider is optional and discovered by ProviderOf.
+func TestProviderOf(t *testing.T) {
+	if _, ok := module.ProviderOf(moduletest.CPU()); ok {
+		t.Fatal("Static must not be a provider")
+	}
+	p := moduletest.WithProvider(moduletest.CPU(), 10*time.Second, func(context.Context) ([]module.Observation, error) {
+		return []module.Observation{{Key: "usage", Value: 42.0}}, nil
+	})
+	prov, ok := module.ProviderOf(p)
+	if !ok {
+		t.Fatal("Provided must be a provider")
+	}
+	if prov.DefaultInterval() != 10*time.Second {
+		t.Fatalf("interval %s", prov.DefaultInterval())
+	}
+	obs, err := prov.Collect(context.Background())
+	if err != nil || len(obs) != 1 || obs[0].Key != "usage" {
+		t.Fatalf("collect: %+v %v", obs, err)
+	}
+	if p.Name() != "cpu" || len(p.Manifest().Attributes) != 3 {
+		t.Fatalf("manifest lost: %s %+v", p.Name(), p.Manifest())
+	}
+	if moduletest.WithProvider(moduletest.CPU(), 0, nil).DefaultInterval() != time.Minute {
+		t.Fatal("zero interval must default to a minute")
 	}
 }

@@ -53,3 +53,11 @@ Working notes for agents. Verify against the OpenAPI contract (`openapi.yaml` in
 - Metric observations are sent as **strings** (`"value": "24.5"`), optional `updated_at`.
 - Metric attributes reject `replace`; `create`/`update` append one observation, the
   metrics endpoint is for many observations or explicit timestamps.
+- **`updated_at` precision**: RFC 3339 with an explicit offset, fractional seconds up to
+  **microseconds**; nanoseconds (Go's default `time.Time` JSON) are rejected with 422.
+  omnistat truncates to microseconds in `internal/omni`.
+- **Value encoding used by omnistat** (feature 003): every dimension is a backfill object
+  `{value, updated_at}` with `value` a string (numbers via `strconv.FormatFloat(v,'f',-1,64)`
+  — the SDK's scalar union only has `float32`; dates `YYYY-MM-DD`; datetimes RFC 3339 UTC;
+  list values as the **item id**) or a boolean. Metric ingestion is chunked at 1 000
+  observations per request (our bound; the platform's is undocumented).

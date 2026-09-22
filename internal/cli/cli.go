@@ -12,21 +12,30 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/omnismith-apps/omnistat/internal/collect"
 	"github.com/omnismith-apps/omnistat/internal/config"
 	"github.com/omnismith-apps/omnistat/internal/module"
 )
 
-// Exit codes. Plan uses ExitChanges to tell scripts changes are pending (FR-021).
+// Exit codes. Plan uses ExitChanges to tell scripts changes are pending
+// (spec 001 FR-021); run uses ExitPartial — the same "attention needed, not
+// an error" status — when some module failed to collect (spec 003 FR-018).
 const (
 	ExitOK      = 0
 	ExitError   = 1
 	ExitChanges = 2
+	ExitPartial = 2
 )
 
-// App is the CLI bound to a module registry and a version string.
+// App is the CLI bound to a module registry and a version string. Clock
+// drives the run loop (spec 003); nil means the wall clock. MaxPerMetric
+// overrides the metric buffer bound; 0 means the spec's 5 000 (FR-008).
+// Both exist for tests.
 type App struct {
-	Registry *module.Registry
-	Version  string
+	Registry     *module.Registry
+	Version      string
+	Clock        collect.Clock
+	MaxPerMetric int
 }
 
 // env is everything a command needs from the outside world.
@@ -82,6 +91,8 @@ func (a *App) Run(ctx context.Context, args []string, stdout, stderr io.Writer, 
 		return a.schema(e, rest[1:])
 	case "identity":
 		return a.identity(e, rest[1:])
+	case "run":
+		return a.run(e, rest[1:])
 	case "help", "-h", "--help":
 		a.usage(stdout, fs)
 		return ExitOK
@@ -103,6 +114,10 @@ Commands:
   schema apply           create what is missing (additive only)
   schema verify          fail if anything is missing; write nothing
   identity [--json]      show this host's identity, its source and the entity it resolves to; write nothing
+  run [--daemon] [--dry-run [--json]]
+                         reconcile, resolve the host entity, collect every module and publish once
+                         (exit 0 ok, 2 some module failed, 1 error); --daemon keeps collecting and
+                         publishes every publish.interval; --dry-run prints what would be sent
   version                print the version
   help                   this text
 

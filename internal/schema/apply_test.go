@@ -72,6 +72,10 @@ func TestApply_EmptyProject(t *testing.T) {
 	if res.Resolved.Templates["host"] != tpls[0].ID || res.Resolved.Attributes["cpu_model"] == "" || len(res.Resolved.Attributes) != 3 {
 		t.Fatalf("resolved: %+v", res.Resolved)
 	}
+	// Spec 003 FR-012a: options created in this run have ids in Resolved.
+	if items := res.Resolved.ListItems["cpu_arch"]; len(items) != 2 || items["arm64"] != srv.Attributes()[0].OptionIDs["arm64"] || items["arm64"] == "" {
+		t.Fatalf("list items: %+v", res.Resolved.ListItems)
+	}
 	if res.Rereads != 0 {
 		t.Fatalf("no re-read expected, got %d", res.Rereads)
 	}

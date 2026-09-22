@@ -8,6 +8,7 @@ import (
 
 	"github.com/omnismith-apps/omnistat/internal/config"
 	"github.com/omnismith-apps/omnistat/internal/identity"
+	"github.com/omnismith-apps/omnistat/internal/manifest"
 	"github.com/omnismith-apps/omnistat/internal/module/machineid"
 	"github.com/omnismith-apps/omnistat/internal/schema"
 )
@@ -64,23 +65,37 @@ func (a *App) resolveDryRun(e env, s config.Settings, id machineid.Identity, rep
 	if err != nil {
 		return err
 	}
-	attr, ok := p.desired.Find(machineid.Name, machineid.AttributeKey)
-	if !ok {
-		return errors.New("machine-id module declares no identity attribute (bug)")
+	if plan := schema.Diff(p.desired, p.current); len(plan.Conflicts) > 0 {
+		return fmt.Errorf("schema is not ready for identity: %w", &schema.ConflictError{Conflicts: plan.Conflicts})
 	}
-	tplSlug := attr.Templates[0]
-	tpl, tplOK := p.current.Templates[tplSlug]
-	_, attrOK := p.current.Attributes[attr.Slug]
-	if plan := schema.Diff(p.desired, p.current); !tplOK || !attrOK || len(plan.Conflicts) > 0 {
-		return fmt.Errorf("schema is not ready for identity (template %q / attribute %q): run `omnistat schema plan`", tplSlug, attr.Slug)
+	target, err := identityTarget(p.desired, schema.ResolvedFrom(p.current))
+	if err != nil {
+		return err
 	}
 	rep.SchemaOK = true
-	h, err := identity.Resolve(e.ctx, p.api, identity.Target{TemplateSlug: tplSlug, TemplateID: tpl.ID, AttributeSlug: attr.Slug}, id.Value, true, e.log)
+	h, err := identity.Resolve(e.ctx, p.api, target, id.Value, true, e.log)
 	if err != nil {
 		return explain(err)
 	}
 	rep.EntityID, rep.WouldCreate, rep.Duplicates = h.EntityID, h.WouldCreate, h.Duplicates
 	return nil
+}
+
+// identityTarget locates the (possibly remapped) identity attribute and its
+// template among the resolved ids (spec 002 FR-010, spec 003 FR-022). It
+// fails when reconciliation has not happened yet.
+func identityTarget(desired manifest.Desired, resolved schema.Resolved) (identity.Target, error) {
+	attr, ok := desired.Find(machineid.Name, machineid.AttributeKey)
+	if !ok {
+		return identity.Target{}, errors.New("machine-id module declares no identity attribute (bug)")
+	}
+	tplSlug := attr.Templates[0]
+	tplID, tplOK := resolved.Templates[tplSlug]
+	_, attrOK := resolved.Attributes[attr.Slug]
+	if !tplOK || !attrOK {
+		return identity.Target{}, fmt.Errorf("schema is not ready for identity (template %q / attribute %q): run `omnistat schema plan`", tplSlug, attr.Slug)
+	}
+	return identity.Target{TemplateSlug: tplSlug, TemplateID: tplID, AttributeSlug: attr.Slug}, nil
 }
 
 func (a *App) printIdentity(e env, rep identityReport, asJSON bool) int {
