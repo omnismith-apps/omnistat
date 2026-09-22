@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"runtime"
 	"strings"
 
 	"github.com/omnismith-apps/omnistat/internal/collect"
@@ -30,12 +31,22 @@ const (
 // App is the CLI bound to a module registry and a version string. Clock
 // drives the run loop (spec 003); nil means the wall clock. MaxPerMetric
 // overrides the metric buffer bound; 0 means the spec's 5 000 (FR-008).
-// Both exist for tests.
+// GOOS decides which attributes are collectable here (spec 004 FR-019);
+// empty means the platform this binary runs on. All three exist for tests.
 type App struct {
 	Registry     *module.Registry
 	Version      string
 	Clock        collect.Clock
 	MaxPerMetric int
+	GOOS         string
+}
+
+// goos is the platform the collectable check gates on (spec 004 FR-017…022).
+func (a *App) goos() string {
+	if a.GOOS != "" {
+		return a.GOOS
+	}
+	return runtime.GOOS
 }
 
 // env is everything a command needs from the outside world.

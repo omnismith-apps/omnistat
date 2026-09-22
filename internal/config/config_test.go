@@ -164,3 +164,39 @@ func TestLoad_Identity(t *testing.T) {
 		t.Fatalf("too long: %v", err)
 	}
 }
+
+// Spec 001 FR-006 / US-4/1: disabling a module must work. A `modules.<name>`
+// block that only switches the module on or off is not a schema override, and
+// recording it as one made `enabled: false` fail with "override for unknown
+// module" — the module is, by then, deliberately not among the manifests.
+func TestLoad_SwitchesAreNotSchemaOverrides(t *testing.T) {
+	path := t.TempDir() + "/omnistat.yaml"
+	if err := writeFile(path, "modules:\n  cpu:\n    enabled: false\n  hostname:\n    interval: 30s\n"); err != nil {
+		t.Fatal(err)
+	}
+	s, err := config.Load(path, env(map[string]string{"OMNISMITH_ACCESS_TOKEN": "omni_t", "OMNISMITH_PROJECT_ID": "p1"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if on, set := s.Modules["cpu"]; !set || on {
+		t.Fatalf("cpu should be switched off: %v %v", on, set)
+	}
+	if got := s.Intervals["hostname"]; got != 30*time.Second {
+		t.Fatalf("hostname interval: %v", got)
+	}
+	if len(s.Overrides.Modules) != 0 {
+		t.Fatalf("switches must not become schema overrides: %+v", s.Overrides.Modules)
+	}
+	// A block that does remap schema still produces an override.
+	path2 := t.TempDir() + "/omnistat.yaml"
+	if err := writeFile(path2, "modules:\n  cpu:\n    enabled: true\n    attributes:\n      usage: { slug: busy_pct }\n"); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := config.Load(path2, env(map[string]string{"OMNISMITH_ACCESS_TOKEN": "omni_t", "OMNISMITH_PROJECT_ID": "p1"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s2.Overrides.Modules["cpu"].Attributes["usage"].Slug; got != "busy_pct" {
+		t.Fatalf("real overrides must survive: %q", got)
+	}
+}

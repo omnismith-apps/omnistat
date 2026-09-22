@@ -45,7 +45,7 @@ func (a *App) run(e env, args []string) int {
 		return fail(e, err)
 	}
 	// Everything that can fail on configuration alone fails before the network (FR-003).
-	sources, err := collect.Sources(p.desired, p.modules, p.settings.Intervals)
+	sources, skipped, err := collect.Sources(p.desired, p.modules, p.settings.Intervals, a.goos())
 	if err != nil {
 		return fail(e, err)
 	}
@@ -63,11 +63,22 @@ func (a *App) run(e env, args []string) int {
 	for _, src := range sources {
 		e.log.Info("module scheduled", "module", src.Module, "interval", src.Interval)
 	}
+	// What this platform cannot collect is said once, here — never once per
+	// tick (spec 004 FR-016, FR-023).
+	for _, sk := range skipped {
+		where := strings.Join(sk.Platforms, ",")
+		if sk.Key == "" {
+			e.log.Info("module skipped: not collectable on this platform", "module", sk.Module, "platform", a.goos(), "collectable_on", where)
+			continue
+		}
+		e.log.Info("attribute skipped: not collectable on this platform", "module", sk.Module, "key", sk.Key, "slug", sk.Slug, "platform", a.goos(), "collectable_on", where)
+	}
 	e.log.Info("publish scheduled", "interval", p.settings.PublishInterval, "daemon", *daemon, "dry_run", *dryRun)
 
 	pub := &publish.Publisher{API: p.api, EntityID: host.EntityID, ListItems: resolved.ListItems, Log: e.log}
 	if *dryRun {
-		pub.Printer = &publish.Printer{W: e.stdout, JSON: *asJSON}
+		pub.Printer = &publish.Printer{W: e.stdout, JSON: *asJSON, Skipped: skippedLines(skipped)}
+		printSkipped(e, skipped, a.goos(), *asJSON)
 	}
 	buf := collect.NewBuffer(a.MaxPerMetric)
 	l := &loop{env: e, clock: clock, buf: buf, pub: pub, sources: sources, interval: p.settings.PublishInterval, timeout: p.settings.HTTP.Timeout}
@@ -225,4 +236,34 @@ func (l *loop) publish(ctx context.Context) (publish.Result, error) {
 	}
 	l.env.log.Info("published", attrs...)
 	return res, nil
+}
+
+// skippedLines renders the platform skips for the dry-run JSON document.
+func skippedLines(skipped []collect.Skipped) []publish.SkippedLine {
+	if len(skipped) == 0 {
+		return nil
+	}
+	out := make([]publish.SkippedLine, 0, len(skipped))
+	for _, sk := range skipped {
+		out = append(out, publish.SkippedLine{Module: sk.Module, Key: sk.Key, Slug: sk.Slug, Platforms: sk.Platforms})
+	}
+	return out
+}
+
+// printSkipped shows, once per run, what the platform cannot collect, so that
+// a dry-run explains an absent value instead of leaving the operator to guess
+// (spec 004 US-5/3). JSON carries the same list inside every document.
+func printSkipped(e env, skipped []collect.Skipped, goos string, asJSON bool) {
+	if len(skipped) == 0 || asJSON {
+		return
+	}
+	fmt.Fprintf(e.stdout, "not collectable on %s:\n", goos)
+	for _, sk := range skipped {
+		where := strings.Join(sk.Platforms, ", ")
+		if sk.Key == "" {
+			fmt.Fprintf(e.stdout, "  module %s (collectable on %s)\n", sk.Module, where)
+			continue
+		}
+		fmt.Fprintf(e.stdout, "  %s.%s → %s (collectable on %s)\n", sk.Module, sk.Key, sk.Slug, where)
+	}
 }

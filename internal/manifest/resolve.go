@@ -58,6 +58,10 @@ type DesiredAttribute struct {
 	// Module and Key identify the manifest entry for messages and logs.
 	Module string
 	Key    string
+	// Platforms is the manifest's platform declaration, carried through
+	// unchanged: overrides may move an attribute's slug or template, but
+	// not where it can be collected (ADR-0007).
+	Platforms []string
 }
 
 // Template returns the desired template with the given slug, if any.
@@ -146,6 +150,7 @@ func Resolve(manifests []Manifest, ov Overrides) (Desired, error) {
 				Options:     append([]string(nil), a.Options...),
 				Module:      m.Module,
 				Key:         a.Key,
+				Platforms:   append([]string(nil), a.Platforms...),
 			}
 			if ao.Slug != "" && ValidSlug(ao.Slug) {
 				da.Slug = ao.Slug

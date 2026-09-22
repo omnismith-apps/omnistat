@@ -207,6 +207,14 @@ func Load(path string, getenv func(string) string) (Settings, error) {
 				s.Intervals[name] = d
 			}
 		}
+		// Only a block that actually remaps schema becomes an override.
+		// `enabled` and `interval` are not schema, and recording them here
+		// made disabling a module fail as an "override for unknown module"
+		// once the module was no longer among the enabled manifests
+		// (spec 001 FR-006, US-4/1).
+		if mf.Template == "" && len(mf.Attributes) == 0 {
+			continue
+		}
 		mo := manifest.ModuleOverride{Template: mf.Template}
 		if len(mf.Attributes) > 0 {
 			mo.Attributes = map[string]manifest.AttributeOverride{}

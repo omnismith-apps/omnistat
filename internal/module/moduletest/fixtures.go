@@ -38,14 +38,16 @@ func WithProvider(m module.Module, interval time.Duration, collect func(ctx cont
 	return Provided{Static: module.Static{M: m.Manifest()}, Interval: interval, Fn: collect}
 }
 
-// CPU is a fixture with a text, a metric and a list attribute on the host template.
-func CPU() module.Module {
+// Probe is a fixture with a text, a metric and a list attribute on the host
+// template. Its name and slugs are deliberately unlike any shipped module's,
+// so that a test registry may hold it alongside the real ones.
+func Probe() module.Module {
 	return module.Static{M: manifest.Manifest{
-		Module: "cpu",
+		Module: "probe",
 		Attributes: []manifest.Attribute{
-			{Key: "model", Name: "CPU model", Slug: "cpu_model", Kind: manifest.KindText, Description: "Model string as reported by the OS"},
-			{Key: "usage", Name: "CPU usage", Slug: "cpu_usage_pct", Kind: manifest.KindMetric, Description: "Percent busy"},
-			{Key: "arch", Name: "CPU architecture", Slug: "cpu_arch", Kind: manifest.KindList, Options: []string{"amd64", "arm64"}},
+			{Key: "model", Name: "Probe model", Slug: "probe_model", Kind: manifest.KindText, Description: "Model string as reported by the OS"},
+			{Key: "usage", Name: "Probe usage", Slug: "probe_usage_pct", Kind: manifest.KindMetric, Description: "Percent busy"},
+			{Key: "arch", Name: "Probe architecture", Slug: "probe_arch", Kind: manifest.KindList, Options: []string{"amd64", "arm64"}},
 		},
 	}}
 }
@@ -71,11 +73,11 @@ func Ident() module.Module {
 	}}
 }
 
-// Registry returns a registry with Ident (required), CPU (on) and Disk (off by default).
+// Registry returns a registry with Ident (required), Probe (on) and Disk (off by default).
 func Registry() *module.Registry {
 	r := module.NewRegistry()
 	r.Register(Ident(), module.Required())
-	r.Register(CPU())
+	r.Register(Probe())
 	r.Register(Disk(), module.DisabledByDefault())
 	return r
 }

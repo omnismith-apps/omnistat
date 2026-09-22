@@ -7,8 +7,9 @@ publishes dimensions and ingests metrics. Slugs have stable defaults and can be
 remapped in config to fit an existing schema or marketplace blueprint.
 
 > Status: **early.** Developed spec-first — see [`specs/README.md`](specs/README.md).
-> Features 001 (schema reconciliation), 002 (host identity) and 003 (run loop, publisher,
-> `hostname` module) are implemented; the next specs add value modules (`ip-address`, `cpu`, …).
+> Features 001 (schema reconciliation), 002 (host identity), 003 (run loop, publisher,
+> `hostname` module) and 004 (`cpu`, the first metric provider) are implemented; the next
+> specs add further value modules (`ip-address`, `memory`, `disk`, …).
 
 ## Why
 
@@ -38,6 +39,25 @@ collection, then every `publish.interval`; on SIGTERM/SIGINT it publishes what i
 buffered and exits 0. Observations are stamped when collected, so a network outage only
 delays them (the buffer holds up to 5 000 observations per metric).
 
+### Modules
+
+| Module | Publishes | Default cadence |
+|--------|-----------|-----------------|
+| `machine-id` | `machine_id` (text) — the host entity's idempotency key; always enabled | once, at startup |
+| `hostname` | `hostname` (text) — the entity's human-readable label | 5m |
+| `cpu` | `cpu_usage_pct`, `load_avg_1`, `load_avg_5`, `load_avg_15` (metrics); `cpu_model`, `cpu_cores`, `cpu_arch` (dimensions) | 10s |
+
+CPU usage is the non-idle share of the CPU time that elapsed since the previous reading,
+aggregated across every logical CPU, so a fully busy 8-core host reports 100, not 800.
+The first collection of a process measures over a short 250ms window so that a one-shot
+`omnistat run` publishes a real number; every later one spans the whole interval.
+
+An attribute may declare the platforms it can be collected on. **Load averages are not
+collected on Windows**, which maintains no load average — omnistat says so once at
+startup and publishes nothing for them rather than substituting the nearest available
+number. The attributes are still declared in the project schema everywhere, so a mixed
+fleet converges on one schema.
+
 The host identity is derived from the OS machine id (`/etc/machine-id` on Linux,
 the platform UUID on macOS) as a keyed hash — the raw id is never published. Pin it
 for clones or containers with `OMNISTAT_IDENTITY=…` or `identity.static` in the config.
@@ -55,7 +75,7 @@ modules:
   hostname:
     interval: 5m         # per-module collection cadence (1s–24h; default from the module)
   cpu:
-    enabled: true
+    interval: 10s        # cpu's own default
     attributes:
       usage: { slug: cpu_usage }   # fit an existing attribute
 identity:

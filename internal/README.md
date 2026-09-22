@@ -10,9 +10,10 @@ justifies them against a requirement ID (constitution VI).
 | `module` | `Module` / `Provider` contracts and the registry | 001, 003 |
 | `module/machineid` | Identity module: `machine_id` attribute, OS discovery, derivation | 002 |
 | `module/hostname` | Reference value module: `hostname` dimension | 003 |
+| `module/cpu` | First metric provider: usage rate, load averages, CPU dimensions; the only package importing gopsutil | 004 |
 | `module/moduletest` | Fixture modules and scripted providers for tests | 001, 003 |
 | `identity` | Find-or-create of the host entity | 002 |
-| `collect` | Validation, stamping, bounded buffer, scheduler, one-shot collection (pure, injected clock) | 003 |
+| `collect` | Validation, stamping, bounded buffer, scheduler, one-shot collection, per-platform gating (pure, injected clock) | 003, 004 |
 | `publish` | Batches → entity update + metric ingestion; list-id mapping; dry-run printer | 003 |
-| `omni` | The only package that imports the SDK; implements the narrow API interfaces | 001, 002, 003 |
+| `omni` | The only package that imports the SDK; implements the narrow API interfaces | 001, 002, 003, 004 |
 | `omni/omnitest` | `httptest` fake of the Omnismith API | 001, 002, 003 |

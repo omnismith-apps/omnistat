@@ -80,6 +80,11 @@ func Validate(manifests []Manifest) error {
 			if a.Template != "" && !ValidSlug(a.Template) {
 				add("%s: template slug %q must match ^[a-z][a-z0-9_]*$", where, a.Template)
 			}
+			for _, pl := range a.Platforms {
+				if !ValidPlatform(pl) {
+					add("%s: platform %q is not one of %s", where, pl, strings.Join(KnownPlatforms(), ", "))
+				}
+			}
 		}
 	}
 	return errors.Join(problems...)

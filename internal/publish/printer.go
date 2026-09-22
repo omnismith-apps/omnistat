@@ -16,25 +16,37 @@ type Line struct {
 	At     time.Time `json:"at"`
 }
 
+// SkippedLine is one attribute — or, with an empty Key, one whole module —
+// that this platform cannot collect (spec 004 FR-023, ADR-0007).
+type SkippedLine struct {
+	Module    string   `json:"module"`
+	Key       string   `json:"key,omitempty"`
+	Slug      string   `json:"slug,omitempty"`
+	Platforms []string `json:"platforms,omitempty"`
+}
+
 // Printer writes what a publish would send. JSON emits one document per
-// publish carrying a version field (FR-021).
+// publish carrying a version field (FR-021). Skipped is fixed for the run and
+// repeated in every document, so that each one stands alone for a script.
 type Printer struct {
-	W    io.Writer
-	JSON bool
+	W       io.Writer
+	JSON    bool
+	Skipped []SkippedLine
 }
 
 type document struct {
-	Version    int    `json:"version"`
-	Entity     string `json:"entity,omitempty"`
-	Dimensions []Line `json:"dimensions"`
-	Metrics    []Line `json:"metrics"`
+	Version    int           `json:"version"`
+	Entity     string        `json:"entity,omitempty"`
+	Dimensions []Line        `json:"dimensions"`
+	Metrics    []Line        `json:"metrics"`
+	Skipped    []SkippedLine `json:"skipped,omitempty"`
 }
 
 // Print renders one publish. An empty entity id means the entity does not
 // exist yet (dry-run before the first real run).
 func (p *Printer) Print(entityID string, dims, metrics []Line) {
 	if p.JSON {
-		doc := document{Version: 1, Entity: entityID, Dimensions: dims, Metrics: metrics}
+		doc := document{Version: 1, Entity: entityID, Dimensions: dims, Metrics: metrics, Skipped: p.Skipped}
 		if doc.Dimensions == nil {
 			doc.Dimensions = []Line{}
 		}

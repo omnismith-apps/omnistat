@@ -174,3 +174,40 @@ func TestResolve_UndeclaredTemplateIsCreated(t *testing.T) {
 		t.Fatalf("server_node template missing: %+v", d.Templates)
 	}
 }
+
+// FR-017/FR-020 (ADR-0007): an attribute's platform declaration survives Resolve
+// untouched by overrides, and the desired schema is the same everywhere — a host
+// that cannot collect a value still declares it, so a mixed fleet converges on one
+// schema (constitution III).
+func TestResolve_PlatformsSurviveAndDoNotFilter(t *testing.T) {
+	ms := two()
+	ms[0].Attributes[1].Platforms = []string{"linux", "darwin"}
+
+	d, err := manifest.Resolve(ms, manifest.Overrides{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := attr(t, d, "cpu_usage_pct").Platforms; strings.Join(got, ",") != "linux,darwin" {
+		t.Fatalf("platforms lost by Resolve: %v", got)
+	}
+	if got := attr(t, d, "cpu_model").Platforms; len(got) != 0 {
+		t.Fatalf("an undeclared platform list must stay empty (= everywhere), got %v", got)
+	}
+
+	// A slug override must not disturb the platform list.
+	ov := manifest.Overrides{Modules: map[string]manifest.ModuleOverride{
+		"cpu": {Attributes: map[string]manifest.AttributeOverride{"usage": {Slug: "busy_pct"}}}}}
+	d2, err := manifest.Resolve(ms, ov)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := attr(t, d2, "busy_pct").Platforms; strings.Join(got, ",") != "linux,darwin" {
+		t.Fatalf("platforms lost by an override: %v", got)
+	}
+
+	// FR-020: nothing about Resolve depends on the running platform, so the
+	// attribute set is identical whatever the host is.
+	if len(d.Attributes) != len(two()[0].Attributes)+len(two()[1].Attributes) {
+		t.Fatalf("platform-gated attributes must still be desired: %d", len(d.Attributes))
+	}
+}

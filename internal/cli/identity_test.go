@@ -24,7 +24,7 @@ func registryWithMachineID(fsys fstest.MapFS) *module.Registry {
 	m.FS = fsys
 	r := module.NewRegistry()
 	r.Register(m, module.Required())
-	r.Register(moduletest.CPU())
+	r.Register(moduletest.Probe())
 	return r
 }
 

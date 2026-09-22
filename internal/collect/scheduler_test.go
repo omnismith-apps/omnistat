@@ -84,9 +84,9 @@ func TestScheduler_Cadence(t *testing.T) {
 	disk := &counter{collect: func(context.Context, int32) ([]module.Observation, error) {
 		return []module.Observation{{Key: "count", Value: 2}}, nil
 	}}
-	cpuMod := moduletest.WithProvider(moduletest.CPU(), 10*time.Second, cpu.fn)
+	cpuMod := moduletest.WithProvider(moduletest.Probe(), 10*time.Second, cpu.fn)
 	diskMod := moduletest.WithProvider(moduletest.Disk(), 30*time.Second, disk.fn)
-	sources, err := collect.Sources(desiredFor(t, cpuMod, diskMod), []module.Module{cpuMod, diskMod}, nil)
+	sources, _, err := collect.Sources(desiredFor(t, cpuMod, diskMod), []module.Module{cpuMod, diskMod}, nil, "linux")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestScheduler_Cadence(t *testing.T) {
 	if len(b.Dims) != 1 || b.Dims[0].Slug != "disk_count" || b.Dims[0].Value != 2.0 || !b.Dims[0].At.Equal(t0) {
 		t.Fatalf("dims: %+v", b.Dims)
 	}
-	if len(b.Metrics) != 1 || b.Metrics[0].Slug != "cpu_usage_pct" || b.Metrics[0].Value != 42.0 || !b.Metrics[0].At.Equal(t0) {
+	if len(b.Metrics) != 1 || b.Metrics[0].Slug != "probe_usage_pct" || b.Metrics[0].Value != 42.0 || !b.Metrics[0].At.Equal(t0) {
 		t.Fatalf("metrics: %+v", b.Metrics)
 	}
 
@@ -124,11 +124,11 @@ func TestScheduler_Cadence(t *testing.T) {
 // FR-006: the stamp is the clock when the provider returned, not when it was called.
 func TestScheduler_StampAtReturn(t *testing.T) {
 	clock := collect.NewFakeClock(t0)
-	m := moduletest.WithProvider(moduletest.CPU(), time.Minute, func(context.Context) ([]module.Observation, error) {
+	m := moduletest.WithProvider(moduletest.Probe(), time.Minute, func(context.Context) ([]module.Observation, error) {
 		clock.Advance(3 * time.Second)
 		return []module.Observation{{Key: "model", Value: "x"}}, nil
 	})
-	sources, _ := collect.Sources(desiredFor(t, m), []module.Module{m}, nil)
+	sources, _, _ := collect.Sources(desiredFor(t, m), []module.Module{m}, nil, "linux")
 	s, buf, _ := start(t, sources, clock, nil)
 	<-s.FirstRound()
 	if b := buf.Snapshot(); !b.Dims[0].At.Equal(t0.Add(3 * time.Second)) {
@@ -151,9 +151,9 @@ func TestScheduler_FailureIsolation(t *testing.T) {
 			{Key: "mount", Value: 12},
 		}, nil
 	}}
-	badMod := moduletest.WithProvider(moduletest.CPU(), 10*time.Second, bad.fn)
+	badMod := moduletest.WithProvider(moduletest.Probe(), 10*time.Second, bad.fn)
 	goodMod := moduletest.WithProvider(moduletest.Disk(), 10*time.Second, good.fn)
-	sources, _ := collect.Sources(desiredFor(t, badMod, goodMod), []module.Module{badMod, goodMod}, nil)
+	sources, _, _ := collect.Sources(desiredFor(t, badMod, goodMod), []module.Module{badMod, goodMod}, nil, "linux")
 	clock := collect.NewFakeClock(t0)
 	var logw bytes.Buffer
 	s, buf, _ := start(t, sources, clock, &logw)
@@ -168,7 +168,7 @@ func TestScheduler_FailureIsolation(t *testing.T) {
 		t.Fatalf("buffer: %+v", b)
 	}
 	logs := logw.String()
-	for _, want := range []string{`collection failed`, `module=cpu`, `error=boom`, `provider panicked: kaboom`,
+	for _, want := range []string{`collection failed`, `module=probe`, `error=boom`, `provider panicked: kaboom`,
 		`key not declared in manifest`, `key=nope`, `invalid value`, `key=mount`, `module=disk`} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("log should contain %q:\n%s", want, logs)
@@ -182,8 +182,8 @@ func TestScheduler_Deadline(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}}
-	m := moduletest.WithProvider(moduletest.CPU(), 10*time.Second, slow.fn)
-	sources, _ := collect.Sources(desiredFor(t, m), []module.Module{m}, nil)
+	m := moduletest.WithProvider(moduletest.Probe(), 10*time.Second, slow.fn)
+	sources, _, _ := collect.Sources(desiredFor(t, m), []module.Module{m}, nil, "linux")
 	clock := collect.NewFakeClock(t0)
 	s, buf, cancel := start(t, sources, clock, nil)
 	waitFor(t, "provider blocked", func() bool { return slow.inside.Load() == 1 })
@@ -209,9 +209,9 @@ func TestScheduler_Concurrency(t *testing.T) {
 		}}
 	}
 	a, b := mk(), mk()
-	am := moduletest.WithProvider(moduletest.CPU(), time.Second, a.fn)
+	am := moduletest.WithProvider(moduletest.Probe(), time.Second, a.fn)
 	bm := moduletest.WithProvider(moduletest.Disk(), time.Second, b.fn)
-	sources, _ := collect.Sources(desiredFor(t, am, bm), []module.Module{am, bm}, nil)
+	sources, _, _ := collect.Sources(desiredFor(t, am, bm), []module.Module{am, bm}, nil, "linux")
 	clock := collect.NewFakeClock(t0)
 	before := runtime.NumGoroutine()
 	s, _, cancel := start(t, sources, clock, nil)
@@ -229,13 +229,13 @@ func TestOnce(t *testing.T) {
 	ok := moduletest.WithProvider(moduletest.Disk(), time.Minute, func(context.Context) ([]module.Observation, error) {
 		return []module.Observation{{Key: "count", Value: 3}}, nil
 	})
-	bad := moduletest.WithProvider(moduletest.CPU(), time.Minute, func(context.Context) ([]module.Observation, error) {
-		return nil, errors.New("no cpu today")
+	bad := moduletest.WithProvider(moduletest.Probe(), time.Minute, func(context.Context) ([]module.Observation, error) {
+		return nil, errors.New("no probe today")
 	})
-	sources, _ := collect.Sources(desiredFor(t, ok, bad), []module.Module{ok, bad}, nil)
+	sources, _, _ := collect.Sources(desiredFor(t, ok, bad), []module.Module{ok, bad}, nil, "linux")
 	buf := collect.NewBuffer(0)
 	failed := collect.Once(context.Background(), sources, buf, collect.NewFakeClock(t0), nil)
-	if strings.Join(failed, ",") != "cpu" {
+	if strings.Join(failed, ",") != "probe" {
 		t.Fatalf("failed: %v", failed)
 	}
 	if b := buf.Snapshot(); len(b.Dims) != 1 || b.Dims[0].Value != 3.0 || !b.Dims[0].At.Equal(t0) {
@@ -246,21 +246,21 @@ func TestOnce(t *testing.T) {
 // FR-001/003: Sources skips modules without a provider, applies overrides,
 // rejects an interval for a module that produces nothing.
 func TestSources(t *testing.T) {
-	cpu := moduletest.WithProvider(moduletest.CPU(), 10*time.Second, nil)
+	probe := moduletest.WithProvider(moduletest.Probe(), 10*time.Second, nil)
 	ident := moduletest.Ident()
-	mods := []module.Module{ident, cpu}
-	sources, err := collect.Sources(desiredFor(t, mods...), mods, map[string]time.Duration{"cpu": 5 * time.Second})
+	mods := []module.Module{ident, probe}
+	sources, _, err := collect.Sources(desiredFor(t, mods...), mods, map[string]time.Duration{"probe": 5 * time.Second}, "linux")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sources) != 1 || sources[0].Module != "cpu" || sources[0].Interval != 5*time.Second || len(sources[0].Attrs) != 3 || sources[0].Attrs["usage"].Slug != "cpu_usage_pct" {
+	if len(sources) != 1 || sources[0].Module != "probe" || sources[0].Interval != 5*time.Second || len(sources[0].Attrs) != 3 || sources[0].Attrs["usage"].Slug != "probe_usage_pct" {
 		t.Fatalf("sources: %+v", sources)
 	}
-	sources, err = collect.Sources(desiredFor(t, mods...), mods, nil)
+	sources, _, err = collect.Sources(desiredFor(t, mods...), mods, nil, "linux")
 	if err != nil || sources[0].Interval != 10*time.Second {
 		t.Fatalf("default interval: %+v %v", sources, err)
 	}
-	_, err = collect.Sources(desiredFor(t, mods...), mods, map[string]time.Duration{"ident": time.Minute})
+	_, _, err = collect.Sources(desiredFor(t, mods...), mods, map[string]time.Duration{"ident": time.Minute}, "linux")
 	if err == nil || !strings.Contains(err.Error(), "modules.ident.interval: module ident produces no values") {
 		t.Fatalf("err: %v", err)
 	}
@@ -268,19 +268,121 @@ func TestSources(t *testing.T) {
 
 // Overrides flow into sources: a remapped slug is what the sample carries.
 func TestSources_Overrides(t *testing.T) {
-	cpu := moduletest.WithProvider(moduletest.CPU(), 10*time.Second, func(context.Context) ([]module.Observation, error) {
+	probe := moduletest.WithProvider(moduletest.Probe(), 10*time.Second, func(context.Context) ([]module.Observation, error) {
 		return []module.Observation{{Key: "usage", Value: 1}}, nil
 	})
-	d, err := manifest.Resolve(module.Manifests([]module.Module{cpu}), manifest.Overrides{Modules: map[string]manifest.ModuleOverride{
-		"cpu": {Attributes: map[string]manifest.AttributeOverride{"usage": {Slug: "cpu_load"}}},
+	d, err := manifest.Resolve(module.Manifests([]module.Module{probe}), manifest.Overrides{Modules: map[string]manifest.ModuleOverride{
+		"probe": {Attributes: map[string]manifest.AttributeOverride{"usage": {Slug: "probe_load"}}},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sources, _ := collect.Sources(d, []module.Module{cpu}, nil)
+	sources, _, _ := collect.Sources(d, []module.Module{probe}, nil, "linux")
 	buf := collect.NewBuffer(0)
 	collect.Once(context.Background(), sources, buf, collect.NewFakeClock(t0), nil)
-	if b := buf.Snapshot(); len(b.Metrics) != 1 || b.Metrics[0].Slug != "cpu_load" || b.Metrics[0].Key != "usage" {
+	if b := buf.Snapshot(); len(b.Metrics) != 1 || b.Metrics[0].Slug != "probe_load" || b.Metrics[0].Key != "usage" {
 		t.Fatalf("buffer: %+v", b)
+	}
+}
+
+// gated builds a module whose "usage" is collectable everywhere and whose
+// "load1" is collectable only on linux and darwin — the real shape of `cpu`
+// (004 FR-018).
+func gated(name string) module.Module {
+	return module.Static{M: manifest.Manifest{Module: name, Attributes: []manifest.Attribute{
+		{Key: "usage", Name: "Usage", Slug: name + "_usage_pct", Kind: manifest.KindMetric},
+		{Key: "load1", Name: "Load 1m", Slug: name + "_load_avg_1", Kind: manifest.KindMetric,
+			Platforms: []string{"linux", "darwin"}},
+	}}}
+}
+
+// linuxOnly builds a module no attribute of which can be collected off linux.
+func linuxOnly(name string) module.Module {
+	return module.Static{M: manifest.Manifest{Module: name, Attributes: []manifest.Attribute{
+		{Key: "temp", Name: "Temp", Slug: name + "_temp_c", Kind: manifest.KindMetric,
+			Platforms: []string{"linux"}},
+	}}}
+}
+
+// FR-018/FR-019 (ADR-0007): an attribute the platform cannot report is kept out
+// of the source's Attrs and reported once as Skipped; a module with nothing left
+// to collect is not scheduled at all. The desired schema is untouched either way
+// (FR-020).
+func TestSources_PlatformGating(t *testing.T) {
+	g := moduletest.WithProvider(gated("gate"), 10*time.Second, nil)
+	mods := []module.Module{g}
+	desired := desiredFor(t, mods...)
+
+	// On linux both attributes are collectable and nothing is skipped.
+	src, skipped, err := collect.Sources(desired, mods, nil, "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(src) != 1 || len(src[0].Attrs) != 2 || len(src[0].Unsupported) != 0 || len(skipped) != 0 {
+		t.Fatalf("linux: attrs=%v unsupported=%v skipped=%v", src[0].Attrs, src[0].Unsupported, skipped)
+	}
+
+	// On windows the load average is dropped — it is reported once, not per tick.
+	src, skipped, err = collect.Sources(desired, mods, nil, "windows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(src) != 1 || len(src[0].Attrs) != 1 {
+		t.Fatalf("windows: attrs=%v", src[0].Attrs)
+	}
+	if _, ok := src[0].Attrs["usage"]; !ok {
+		t.Fatal("usage must stay collectable on windows")
+	}
+	if !src[0].Unsupported["load1"] {
+		t.Fatalf("load1 must be marked unsupported: %v", src[0].Unsupported)
+	}
+	if len(skipped) != 1 || skipped[0].Module != "gate" || skipped[0].Key != "load1" ||
+		skipped[0].Slug != "gate_load_avg_1" || strings.Join(skipped[0].Platforms, ",") != "linux,darwin" {
+		t.Fatalf("skipped: %+v", skipped)
+	}
+
+	// FR-020: the schema does not depend on the platform.
+	if len(desiredFor(t, mods...).Attributes) != 2 {
+		t.Fatal("gating must not change the desired schema")
+	}
+}
+
+// FR-019: nothing collectable here ⇒ the module is not scheduled, and it is
+// reported as a whole rather than attribute by attribute.
+func TestSources_WholeModuleSkipped(t *testing.T) {
+	lo := moduletest.WithProvider(linuxOnly("therm"), 10*time.Second, nil)
+	g := moduletest.WithProvider(gated("gate"), 10*time.Second, nil)
+	mods := []module.Module{lo, g}
+
+	src, skipped, err := collect.Sources(desiredFor(t, mods...), mods, nil, "windows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(src) != 1 || src[0].Module != "gate" {
+		t.Fatalf("therm must not be scheduled: %+v", src)
+	}
+	var whole *collect.Skipped
+	for i := range skipped {
+		if skipped[i].Module == "therm" {
+			whole = &skipped[i]
+		}
+	}
+	if whole == nil || whole.Key != "" || strings.Join(whole.Platforms, ",") != "linux" {
+		t.Fatalf("module-level skip missing or wrong: %+v", skipped)
+	}
+}
+
+// FR-022: the platform decides, not the config. Configuring an interval for a
+// module that cannot collect here is a no-op, never an error — unlike an
+// interval for a module that produces no values at all (FR-003).
+func TestSources_IntervalForSkippedModuleIsNotAnError(t *testing.T) {
+	lo := moduletest.WithProvider(linuxOnly("therm"), 10*time.Second, nil)
+	mods := []module.Module{lo}
+	src, skipped, err := collect.Sources(desiredFor(t, mods...), mods, map[string]time.Duration{"therm": 5 * time.Second}, "windows")
+	if err != nil {
+		t.Fatalf("enabling an unsupported module must skip, not fail: %v", err)
+	}
+	if len(src) != 0 || len(skipped) != 1 {
+		t.Fatalf("src=%+v skipped=%+v", src, skipped)
 	}
 }

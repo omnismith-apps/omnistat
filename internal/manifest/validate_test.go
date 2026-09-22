@@ -118,3 +118,33 @@ func TestHostTemplate(t *testing.T) {
 		t.Fatalf("FR-003: host template constant changed: %q/%q", manifest.HostTemplate, manifest.HostTemplateName)
 	}
 }
+
+// FR-017: a platform outside the known set is a typo, and a typo must fail at
+// startup rather than silently gate an attribute off everywhere.
+func TestValidate_UnknownPlatform(t *testing.T) {
+	ms := []manifest.Manifest{{Module: "cpu", Attributes: []manifest.Attribute{
+		{Key: "usage", Name: "CPU usage", Slug: "cpu_usage_pct", Kind: manifest.KindMetric, Platforms: []string{"linux", "plan9"}},
+	}}}
+	err := manifest.Validate(ms)
+	if err == nil {
+		t.Fatal("unknown platform must be rejected")
+	}
+	for _, want := range []string{`"cpu"`, `"usage"`, "plan9", "linux"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should name %s: %v", want, err)
+		}
+	}
+	// The known set is the one the rest of the code gates on.
+	if strings.Join(manifest.KnownPlatforms(), ",") != "darwin,linux,windows" {
+		t.Fatalf("known platforms: %v", manifest.KnownPlatforms())
+	}
+	// A declared, known platform is fine; so is none at all.
+	ms[0].Attributes[0].Platforms = []string{"linux", "darwin", "windows"}
+	if err := manifest.Validate(ms); err != nil {
+		t.Fatalf("known platforms must validate: %v", err)
+	}
+	ms[0].Attributes[0].Platforms = nil
+	if err := manifest.Validate(ms); err != nil {
+		t.Fatalf("no platforms must validate: %v", err)
+	}
+}

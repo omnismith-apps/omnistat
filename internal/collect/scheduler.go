@@ -20,15 +20,36 @@ type Source struct {
 	Provider module.Provider
 	Interval time.Duration
 	// Attrs maps manifest key → desired attribute (slug after overrides).
+	// It holds only the attributes collectable on this platform (spec 004
+	// FR-019, ADR-0007).
 	Attrs map[string]manifest.DesiredAttribute
+	// Unsupported holds the keys the module declares but this platform
+	// cannot report. An observation for one of them is dropped quietly: it
+	// was already reported once at startup, so it is not an omission
+	// (spec 004 FR-016).
+	Unsupported map[string]bool
+}
+
+// Skipped is one thing the platform cannot collect, reported once at startup
+// rather than on every tick (spec 004 FR-023, ADR-0007). An empty Key means
+// the whole module is skipped because nothing it declares is collectable here.
+type Skipped struct {
+	Module    string
+	Key       string
+	Slug      string
+	Platforms []string // where it *is* collectable
 }
 
 // Sources pairs every module that has a provider with its interval (the
 // operator's override or the provider's default, FR-003) and its desired
-// attributes. Modules without a provider contribute nothing (FR-001); an
-// interval configured for one of them is an error.
-func Sources(desired manifest.Desired, mods []module.Module, intervals map[string]time.Duration) ([]Source, error) {
+// attributes, dropping what goos cannot collect (spec 004 FR-018…FR-022).
+// Modules without a provider contribute nothing (FR-001); an interval
+// configured for one of them is an error. An interval configured for a module
+// this platform cannot collect is not: the platform decides, not the config
+// (spec 004 FR-022).
+func Sources(desired manifest.Desired, mods []module.Module, intervals map[string]time.Duration, goos string) ([]Source, []Skipped, error) {
 	var out []Source
+	var skipped []Skipped
 	var problems []string
 	for _, m := range mods {
 		p, ok := module.ProviderOf(m)
@@ -38,25 +59,61 @@ func Sources(desired manifest.Desired, mods []module.Module, intervals map[strin
 			}
 			continue
 		}
-		src := Source{Module: m.Name(), Provider: p, Interval: p.DefaultInterval(), Attrs: map[string]manifest.DesiredAttribute{}}
+		src := Source{
+			Module:      m.Name(),
+			Provider:    p,
+			Interval:    p.DefaultInterval(),
+			Attrs:       map[string]manifest.DesiredAttribute{},
+			Unsupported: map[string]bool{},
+		}
 		if d, ok := intervals[m.Name()]; ok {
 			src.Interval = d
 		}
 		if src.Interval <= 0 {
-			return nil, fmt.Errorf("module %s declares a non-positive default interval (bug)", m.Name())
+			return nil, nil, fmt.Errorf("module %s declares a non-positive default interval (bug)", m.Name())
 		}
+		var gated []Skipped
 		for _, a := range desired.Attributes {
-			if a.Module == m.Name() {
-				src.Attrs[a.Key] = a
+			if a.Module != m.Name() {
+				continue
 			}
+			if manifest.Collectable(a.Platforms, goos) {
+				src.Attrs[a.Key] = a
+				continue
+			}
+			src.Unsupported[a.Key] = true
+			gated = append(gated, Skipped{Module: m.Name(), Key: a.Key, Slug: a.Slug, Platforms: a.Platforms})
 		}
+		if len(src.Attrs) == 0 {
+			// Nothing left to collect here: report the module once rather
+			// than attribute by attribute, and do not schedule it (FR-019).
+			skipped = append(skipped, Skipped{Module: m.Name(), Platforms: platformUnion(gated)})
+			continue
+		}
+		skipped = append(skipped, gated...)
 		out = append(out, src)
 	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
-		return nil, fmt.Errorf("config: %s", strings.Join(problems, "; "))
+		return nil, nil, fmt.Errorf("config: %s", strings.Join(problems, "; "))
 	}
-	return out, nil
+	return out, skipped, nil
+}
+
+// platformUnion collects, in first-seen order, every platform the skipped
+// attributes name — what the module as a whole would need to be useful.
+func platformUnion(gated []Skipped) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, g := range gated {
+		for _, p := range g.Platforms {
+			if !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out
 }
 
 // Scheduler runs every source on its own cadence and feeds the buffer
@@ -147,6 +204,13 @@ func collectOne(ctx context.Context, clock Clock, buf *Buffer, log *slog.Logger,
 	for _, o := range obs {
 		attr, ok := src.Attrs[o.Key]
 		if !ok {
+			if src.Unsupported[o.Key] {
+				// Already reported once at startup (spec 004 FR-016/FR-023):
+				// a provider that returns it anyway is not misbehaving enough
+				// to warrant an error on every tick.
+				log.Debug("observation dropped: not collectable on this platform", "module", src.Module, "key", o.Key)
+				continue
+			}
 			log.Error("observation dropped: key not declared in manifest", "module", src.Module, "key", o.Key)
 			continue
 		}

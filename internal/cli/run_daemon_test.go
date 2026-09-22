@@ -69,7 +69,7 @@ func count(reqs []omnitest.Request) int { return len(reqs) }
 // cpu grid (10s): when both fire at the same instant the order is arbitrary and
 // the sample simply lands on the next publish.
 func TestDaemon_Schedule(t *testing.T) {
-	h := newHarness(t, "modules:\n  cpu:\n    interval: 10s\npublish:\n  interval: 55s\n")
+	h := newHarness(t, "modules:\n  probe:\n    interval: 10s\npublish:\n  interval: 55s\n")
 	d := h.daemon(context.Background())
 	// Two sources (hostname 5m, cpu 10s) + the publish loop.
 	h.parked(t)
@@ -77,7 +77,7 @@ func TestDaemon_Schedule(t *testing.T) {
 	if n := count(h.writes("PATCH", "/entities/")); n != 1 {
 		t.Fatalf("first publish right after the first round: %d PATCH", n)
 	}
-	if m := h.srv.EntityMetrics(id)["cpu_usage_pct"]; len(m) != 1 {
+	if m := h.srv.EntityMetrics(id)["probe_usage_pct"]; len(m) != 1 {
 		t.Fatalf("first metrics: %+v", m)
 	}
 	schemaWrites, creates := count(h.writes("POST", "/templates"))+count(h.writes("POST", "/attributes")), count(h.writes("POST", "/entities/template/"))
@@ -94,16 +94,16 @@ func TestDaemon_Schedule(t *testing.T) {
 	h.clock.Advance(5 * time.Second)
 	waitFor(t, "second publish", func() bool { return count(h.writes("PATCH", "/entities/")) == 2 })
 	h.parked(t)
-	m := h.srv.EntityMetrics(id)["cpu_usage_pct"]
+	m := h.srv.EntityMetrics(id)["probe_usage_pct"]
 	if len(m) != 6 || m[1].UpdatedAt != "2026-09-22T10:00:10Z" || m[5].UpdatedAt != "2026-09-22T10:00:50Z" {
 		t.Fatalf("metrics after 55s: %d %+v", len(m), m)
 	}
 	if n := count(h.writes("POST", "/entities/"+id+"/metrics")); n != 2 {
 		t.Fatalf("metric requests: %d", n)
 	}
-	// Hostname (5m) was not re-collected, so the second PATCH carried cpu_model only.
+	// Hostname (5m) was not re-collected, so the second PATCH carried probe_model only.
 	patches := h.writes("PATCH", "/entities/")
-	if strings.Contains(patches[1].Body, "hostname") || !strings.Contains(patches[1].Body, "cpu_model") {
+	if strings.Contains(patches[1].Body, "hostname") || !strings.Contains(patches[1].Body, "probe_model") {
 		t.Fatalf("second PATCH: %s", patches[1].Body)
 	}
 	if count(h.writes("POST", "/templates"))+count(h.writes("POST", "/attributes")) != schemaWrites || count(h.writes("POST", "/entities/template/")) != creates {
@@ -113,7 +113,7 @@ func TestDaemon_Schedule(t *testing.T) {
 	// US-2/3: cpu fails from now on → the tick at 110 finds nothing → no request.
 	// (The fake clock must land exactly on each deadline: a goroutine stamps
 	// with the clock as it is when it wakes.)
-	h.cpuFail.Store(true)
+	h.probeFail.Store(true)
 	before := len(h.srv.Requests())
 	h.clock.Advance(5 * time.Second) // 60
 	h.parked(t)
@@ -129,14 +129,14 @@ func TestDaemon_Schedule(t *testing.T) {
 	}
 
 	// FR-020: one more sample at 120, then stop → final publish → exit 0.
-	h.cpuFail.Store(false)
+	h.probeFail.Store(false)
 	h.clock.Advance(10 * time.Second)
 	h.parked(t)
 	r := d.stop(t)
 	if r.code != 0 || !strings.Contains(r.stderr, "msg=stopped") {
 		t.Fatalf("stop: %+v", r)
 	}
-	if got := h.srv.EntityMetrics(id)["cpu_usage_pct"]; len(got) != 7 || got[6].UpdatedAt != "2026-09-22T10:02:00Z" {
+	if got := h.srv.EntityMetrics(id)["probe_usage_pct"]; len(got) != 7 || got[6].UpdatedAt != "2026-09-22T10:02:00Z" {
 		t.Fatalf("final publish: %+v", got)
 	}
 	if strings.Count(r.stderr, `msg="publish scheduled"`) != 1 || !strings.Contains(r.stderr, "daemon=true") {
@@ -148,7 +148,7 @@ func TestDaemon_Schedule(t *testing.T) {
 // original timestamps when it recovers. (33s publish grid: never coincides
 // with the 10s cpu grid within the test horizon.)
 func TestDaemon_Outage(t *testing.T) {
-	h := newHarness(t, "modules:\n  cpu:\n    interval: 10s\npublish:\n  interval: 33s\nhttp:\n  retries: 0\n")
+	h := newHarness(t, "modules:\n  probe:\n    interval: 10s\npublish:\n  interval: 33s\nhttp:\n  retries: 0\n")
 	d := h.daemon(context.Background())
 	h.parked(t)
 	id := h.entityID(t)
@@ -163,7 +163,7 @@ func TestDaemon_Outage(t *testing.T) {
 	if n := strings.Count(h.logsSnapshot(), "publish failed; keeping the buffer"); n != 3 {
 		t.Fatalf("failed publishes: %d", n)
 	}
-	if got := len(h.srv.EntityMetrics(id)["cpu_usage_pct"]); got != 1 {
+	if got := len(h.srv.EntityMetrics(id)["probe_usage_pct"]); got != 1 {
 		t.Fatalf("nothing should have landed during the outage, got %d", got)
 	}
 	// Recovery at 132: all 13 buffered observations (10 … 130) land with their
@@ -174,7 +174,7 @@ func TestDaemon_Outage(t *testing.T) {
 	}
 	h.clock.Advance(2 * time.Second) // 132
 	h.parked(t)
-	m := h.srv.EntityMetrics(id)["cpu_usage_pct"]
+	m := h.srv.EntityMetrics(id)["probe_usage_pct"]
 	if len(m) != 14 || m[1].UpdatedAt != "2026-09-22T10:00:10Z" || m[13].UpdatedAt != "2026-09-22T10:02:10Z" {
 		t.Fatalf("backfill: %d %+v", len(m), m)
 	}
@@ -185,7 +185,7 @@ func TestDaemon_Outage(t *testing.T) {
 // logged once per publish interval, memory bounded. The bound itself (5 000)
 // is unit-tested in collect; here it is lowered to keep the test fast.
 func TestDaemon_BufferBound(t *testing.T) {
-	h := newHarness(t, "modules:\n  cpu:\n    interval: 1s\n  hostname:\n    interval: 24h\npublish:\n  interval: 30s\nhttp:\n  retries: 0\n")
+	h := newHarness(t, "modules:\n  probe:\n    interval: 1s\n  hostname:\n    interval: 24h\npublish:\n  interval: 30s\nhttp:\n  retries: 0\n")
 	h.maxPerMetric = 20
 	d := h.daemon(context.Background())
 	h.parked(t)
@@ -199,7 +199,7 @@ func TestDaemon_BufferBound(t *testing.T) {
 	// coincide at the ticks, so one sample may land on either side), reported
 	// once at each of the ticks at 30s and 60s.
 	logs := h.logsSnapshot()
-	if n := strings.Count(logs, "metric buffer full"); n != 2 || !strings.Contains(logs, "slug=cpu_usage_pct") {
+	if n := strings.Count(logs, "metric buffer full"); n != 2 || !strings.Contains(logs, "slug=probe_usage_pct") {
 		t.Fatalf("drop warnings: %d\n%s", n, logs)
 	}
 	total := 0
@@ -211,14 +211,14 @@ func TestDaemon_BufferBound(t *testing.T) {
 		t.Fatalf("drops reported: %d\n%s", total, logs)
 	}
 	d.stop(t)
-	if got := h.srv.EntityMetrics(id)["cpu_usage_pct"]; len(got) != 1 {
+	if got := h.srv.EntityMetrics(id)["probe_usage_pct"]; len(got) != 1 {
 		t.Fatalf("outage: %d", len(got))
 	}
 }
 
 // US-3/3, FR-015: the entity disappears → exit non-zero naming it.
 func TestDaemon_EntityGone(t *testing.T) {
-	h := newHarness(t, "modules:\n  cpu:\n    interval: 10s\npublish:\n  interval: 30s\n")
+	h := newHarness(t, "modules:\n  probe:\n    interval: 10s\npublish:\n  interval: 30s\n")
 	d := h.daemon(context.Background())
 	h.parked(t)
 	id := h.entityID(t)
@@ -237,7 +237,7 @@ func TestDaemon_EntityGone(t *testing.T) {
 
 // FR-014: a publish slower than the interval coalesces the missed ticks.
 func TestDaemon_SlowPublish(t *testing.T) {
-	h := newHarness(t, "modules:\n  cpu:\n    interval: 10s\npublish:\n  interval: 30s\n")
+	h := newHarness(t, "modules:\n  probe:\n    interval: 10s\npublish:\n  interval: 30s\n")
 	// Every PATCH takes 70 seconds of fake time.
 	h.srv.Before = func(r *http.Request) {
 		if r.Method == "PATCH" {
@@ -270,7 +270,7 @@ func TestDaemon_SlowPublish(t *testing.T) {
 
 // US-4/2: daemon + dry-run prints every tick and never writes.
 func TestDaemon_DryRun(t *testing.T) {
-	h := newHarness(t, "modules:\n  cpu:\n    interval: 10s\npublish:\n  interval: 30s\n")
+	h := newHarness(t, "modules:\n  probe:\n    interval: 10s\npublish:\n  interval: 30s\n")
 	d := h.daemon(context.Background(), "--dry-run")
 	h.parked(t)
 	for i := 0; i < 3; i++ {

@@ -3,13 +3,25 @@ MODULE   := github.com/omnismith-apps/omnistat
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 
-.PHONY: all build run test test-race lint vet fmt tidy sandbox specs-check clean help
+.PHONY: all build crosscheck run test test-race lint vet fmt tidy sandbox specs-check clean help
+
+# Every target constitution V requires a static binary for, plus the Windows pairs
+# that 004 NFR-005 keeps compiling so the cross-platform readings cannot rot.
+CROSS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
 all: fmt vet lint test build ## Full local gate (same as CI)
 
 build: ## Build ./bin/omnistat
 	@mkdir -p bin
 	go build -trimpath -ldflags '$(LDFLAGS)' -o bin/$(BINARY) ./cmd/$(BINARY)
+
+crosscheck: ## Verify the binary builds CGO-free for every target (004 NFR-005)
+	@set -e; for pair in $(CROSS); do \
+	  goos=$${pair%%/*}; goarch=$${pair##*/}; \
+	  printf '  %-16s' "$$pair"; \
+	  CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch go build -trimpath -o /dev/null ./cmd/$(BINARY); \
+	  echo ok; \
+	done
 
 run: ## Run from source: make run ARGS="schema plan" (sources ./.env if present)
 	@set -a; [ -f .env ] && . ./.env; set +a; go run ./cmd/$(BINARY) $(ARGS)

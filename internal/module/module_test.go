@@ -22,19 +22,19 @@ func names(mods []module.Module) string {
 // FR-006 / US-4: defaults, switches, unknown names, required modules.
 func TestRegistry_Enabled(t *testing.T) {
 	r := moduletest.Registry()
-	if got := strings.Join(r.Names(), ","); got != "cpu,disk,ident" {
+	if got := strings.Join(r.Names(), ","); got != "disk,ident,probe" {
 		t.Fatalf("names: %s", got)
 	}
 	mods, err := r.Enabled(nil)
-	if err != nil || names(mods) != "ident,cpu" {
+	if err != nil || names(mods) != "ident,probe" {
 		t.Fatalf("defaults: %s %v", names(mods), err)
 	}
-	mods, err = r.Enabled(map[string]bool{"disk": true, "cpu": false})
+	mods, err = r.Enabled(map[string]bool{"disk": true, "probe": false})
 	if err != nil || names(mods) != "ident,disk" {
 		t.Fatalf("switched: %s %v", names(mods), err)
 	}
 	_, err = r.Enabled(map[string]bool{"gpu": true})
-	if err == nil || !strings.Contains(err.Error(), `unknown module "gpu" (known: cpu, disk, ident)`) {
+	if err == nil || !strings.Contains(err.Error(), `unknown module "gpu" (known: disk, ident, probe)`) {
 		t.Fatalf("unknown: %v", err)
 	}
 	_, err = r.Enabled(map[string]bool{"ident": false})
@@ -53,8 +53,8 @@ func TestRegistry_DuplicatePanics(t *testing.T) {
 		}
 	}()
 	r := module.NewRegistry()
-	r.Register(moduletest.CPU())
-	r.Register(moduletest.CPU())
+	r.Register(moduletest.Probe())
+	r.Register(moduletest.Probe())
 }
 
 // Fixtures must themselves be valid manifests.
@@ -67,10 +67,10 @@ func TestFixturesValidate(t *testing.T) {
 
 // Spec 003 FR-001: a provider is optional and discovered by ProviderOf.
 func TestProviderOf(t *testing.T) {
-	if _, ok := module.ProviderOf(moduletest.CPU()); ok {
+	if _, ok := module.ProviderOf(moduletest.Probe()); ok {
 		t.Fatal("Static must not be a provider")
 	}
-	p := moduletest.WithProvider(moduletest.CPU(), 10*time.Second, func(context.Context) ([]module.Observation, error) {
+	p := moduletest.WithProvider(moduletest.Probe(), 10*time.Second, func(context.Context) ([]module.Observation, error) {
 		return []module.Observation{{Key: "usage", Value: 42.0}}, nil
 	})
 	prov, ok := module.ProviderOf(p)
@@ -84,10 +84,10 @@ func TestProviderOf(t *testing.T) {
 	if err != nil || len(obs) != 1 || obs[0].Key != "usage" {
 		t.Fatalf("collect: %+v %v", obs, err)
 	}
-	if p.Name() != "cpu" || len(p.Manifest().Attributes) != 3 {
+	if p.Name() != "probe" || len(p.Manifest().Attributes) != 3 {
 		t.Fatalf("manifest lost: %s %+v", p.Name(), p.Manifest())
 	}
-	if moduletest.WithProvider(moduletest.CPU(), 0, nil).DefaultInterval() != time.Minute {
+	if moduletest.WithProvider(moduletest.Probe(), 0, nil).DefaultInterval() != time.Minute {
 		t.Fatal("zero interval must default to a minute")
 	}
 }

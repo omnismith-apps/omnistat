@@ -47,7 +47,7 @@ func TestVersionAndUsage(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	r = exec(t, nil, "")
-	if r.code != cli.ExitError || !strings.Contains(r.stderr, "Usage:") || !strings.Contains(r.stderr, "cpu, disk, ident") {
+	if r.code != cli.ExitError || !strings.Contains(r.stderr, "Usage:") || !strings.Contains(r.stderr, "disk, ident, probe") {
 		t.Fatalf("%+v", r)
 	}
 	r = exec(t, nil, "", "bogus")
@@ -76,7 +76,7 @@ func TestSchema_PlanApplyVerify(t *testing.T) {
 	if r.code != cli.ExitChanges {
 		t.Fatalf("plan: %+v", r)
 	}
-	for _, want := range []string{"+ template host", "+ attribute cpu_model (text) → host  [cpu]", "+ attribute ident_id (text) → host  [ident]", "+ option cpu_arch: amd64", "7 actions, 0 conflicts"} {
+	for _, want := range []string{"+ template host", "+ attribute probe_model (text) → host  [probe]", "+ attribute ident_id (text) → host  [ident]", "+ option probe_arch: amd64", "7 actions, 0 conflicts"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("plan output lacks %q:\n%s", want, r.stdout)
 		}
@@ -143,7 +143,7 @@ func TestSchema_OverridesConflictsSwitches(t *testing.T) {
 schema:
   host_template: server
 modules:
-  cpu:
+  probe:
     attributes:
       usage: { slug: cpu_usage }
   disk:
@@ -156,17 +156,17 @@ modules:
 	if strings.Contains(r.stdout, "cpu_usage") || strings.Contains(r.stdout, "+ template server") {
 		t.Errorf("existing objects must not be planned:\n%s", r.stdout)
 	}
-	for _, want := range []string{"+ template disk", "+ attribute disk_count (number) → server", "+ attribute disk_mount (text) → disk", "+ attribute cpu_model (text) → server"} {
+	for _, want := range []string{"+ template disk", "+ attribute disk_count (number) → server", "+ attribute disk_mount (text) → disk", "+ attribute probe_model (text) → server"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("plan lacks %q:\n%s", want, r.stdout)
 		}
 	}
 
-	// conflict: cpu_model exists as number
-	srv.AddAttribute("cpu_model", "number")
+	// conflict: probe_model exists as number
+	srv.AddAttribute("probe_model", "number")
 	before := len(srv.Requests())
 	r = exec(t, srv, cfg, "schema", "apply")
-	if r.code != cli.ExitError || !strings.Contains(r.stdout, "! conflict cpu_model") || !strings.Contains(r.stderr, "nothing written") {
+	if r.code != cli.ExitError || !strings.Contains(r.stdout, "! conflict probe_model") || !strings.Contains(r.stderr, "nothing written") {
 		t.Fatalf("conflict apply: %+v", r)
 	}
 	if got := len(srv.Requests()) - before; got != 1 {
@@ -184,8 +184,8 @@ modules:
 		t.Fatalf("required off: %+v", r)
 	}
 	// unknown attribute key in override
-	r = exec(t, srv, "modules:\n  cpu:\n    attributes:\n      temp: { slug: t }\n", "schema", "plan")
-	if r.code != cli.ExitError || !strings.Contains(r.stderr, `module "cpu" has no attribute "temp"`) {
+	r = exec(t, srv, "modules:\n  probe:\n    attributes:\n      temp: { slug: t }\n", "schema", "plan")
+	if r.code != cli.ExitError || !strings.Contains(r.stderr, `module "probe" has no attribute "temp"`) {
 		t.Fatalf("unknown key: %+v", r)
 	}
 }

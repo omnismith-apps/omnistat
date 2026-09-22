@@ -34,6 +34,7 @@ Working notes for agents. Verify against the OpenAPI contract (`openapi.yaml` in
 | `updateEntity` | `PATCH /entities/{id}` | Partial dimension update (`last_check_at`, status) |
 | `batchWriteEntities` | `POST /entities/batch` | Bulk create/update (`op` = create/update/replace/delete; `replace` clears omitted attrs) |
 | `ingestEntityMetrics` | `POST /entities/{id}/metrics` | Batch `metric_values` (`attribute_slug` or `attribute_id`, `value`); returns **202** — async pipeline |
+| `getEntityChart` | `GET /entities/{id}/chart` | Read a metric back as a series; see *Reading metrics back* below |
 
 ## Auth & tenancy
 
@@ -56,6 +57,27 @@ Working notes for agents. Verify against the OpenAPI contract (`openapi.yaml` in
 - **`updated_at` precision**: RFC 3339 with an explicit offset, fractional seconds up to
   **microseconds**; nanoseconds (Go's default `time.Time` JSON) are rejected with 422.
   omnistat truncates to microseconds in `internal/omni`.
+## Metrics: creation and read-back (verified 2026-09-22, feature 004 spike)
+
+- **Creating a metric attribute** needs nothing special: the ordinary `createAttribute`
+  path with `attribute_type: 1` works, and the attribute reads back from
+  `/discovery/project-schema` as `"type": "metric"`. Confirmed end to end —
+  create attribute → ingest → 202 → read back.
+- **Reading metrics back**: `GET /entities/{id}/chart`
+  - `attribute_ids` — **required**, comma-separated metric attribute UUIDs (not slugs).
+  - `start`, `end` — **required**, Unix epoch **seconds**. Passing milliseconds is not an
+    error: the call returns `200` with `{"series":[]}`. A silently empty series is the
+    symptom of wrong units.
+  - `bucket_width` — default **`1 hour`**. Enum: `1 second`, `5 seconds`, `10 seconds`,
+    `1 minute`, `5 minutes`, `10 minutes`, `15 minutes`, `30 minutes`, `1 hour`,
+    `6 hours`, `12 hours`, `1 day`, `1 week`, `1 month`. At the default, observations
+    minutes apart collapse into one point — pass an explicit width to see them.
+  - `aggregate_func` — default `avg`; one of `sum`, `avg`, `min`, `max`, `count`,
+    `first`, `last`.
+  - Response: `{"series":[{"attribute_id": "<uuid>", "data":[{"time": "...", "value": 1.5}]}]}`.
+    `time` is RFC 3339 (`2026-09-22T16:46:13+00:00`) and decodes through the SDK as a
+    `time.Time`. `value` is a JSON **number**, although ingestion sends strings.
+
 - **Value encoding used by omnistat** (feature 003): every dimension is a backfill object
   `{value, updated_at}` with `value` a string (numbers via `strconv.FormatFloat(v,'f',-1,64)`
   — the SDK's scalar union only has `float32`; dates `YYYY-MM-DD`; datetimes RFC 3339 UTC;

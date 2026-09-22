@@ -80,6 +80,43 @@ type Attribute struct {
 	Options []string
 	// Template is the slug of the template to attach to; empty means host.
 	Template string
+	// Platforms are the GOOS values on which this attribute can be
+	// collected (ADR-0007). Empty means every platform. It never affects
+	// the desired schema — an attribute is declared everywhere and merely
+	// goes uncollected where the platform cannot report it.
+	Platforms []string
+}
+
+// knownPlatforms is the set an attribute may name. It is deliberately the
+// operating systems omnistat targets, so that a typo fails validation
+// instead of silently gating an attribute off on every host.
+var knownPlatforms = []string{"darwin", "linux", "windows"}
+
+// KnownPlatforms lists the platforms a manifest may declare, sorted.
+func KnownPlatforms() []string { return append([]string(nil), knownPlatforms...) }
+
+// ValidPlatform reports whether s is a platform a manifest may declare.
+func ValidPlatform(s string) bool {
+	for _, p := range knownPlatforms {
+		if p == s {
+			return true
+		}
+	}
+	return false
+}
+
+// Collectable reports whether an attribute declaring these platforms can be
+// collected on goos. No declaration means everywhere (ADR-0007).
+func Collectable(platforms []string, goos string) bool {
+	if len(platforms) == 0 {
+		return true
+	}
+	for _, p := range platforms {
+		if p == goos {
+			return true
+		}
+	}
+	return false
 }
 
 var (

@@ -14,6 +14,7 @@ import (
 
 	"github.com/omnismith-apps/omnistat/internal/cli"
 	"github.com/omnismith-apps/omnistat/internal/collect"
+	"github.com/omnismith-apps/omnistat/internal/manifest"
 	"github.com/omnismith-apps/omnistat/internal/module"
 	"github.com/omnismith-apps/omnistat/internal/module/hostname"
 	"github.com/omnismith-apps/omnistat/internal/module/machineid"
@@ -26,17 +27,19 @@ var t0 = time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
 // harness is a production-like registry (machine-id, hostname, a scripted
 // cpu module with a metric and a list) bound to a fake API and a fake clock.
 type harness struct {
-	srv      *omnitest.Server
-	clock    *collect.FakeClock
-	reg      *module.Registry
-	host     atomic.Value // string
-	cpuCalls atomic.Int32
-	cpuFail  atomic.Bool
-	cfg      string
-	env      map[string]string
-	logs     syncBuffer
+	srv        *omnitest.Server
+	clock      *collect.FakeClock
+	reg        *module.Registry
+	host       atomic.Value // string
+	probeCalls atomic.Int32
+	probeFail  atomic.Bool
+	cfg        string
+	env        map[string]string
+	logs       syncBuffer
 	// maxPerMetric lowers the buffer bound (0 = spec default).
 	maxPerMetric int
+	// goos overrides the platform the collectable check gates on (004 FR-019).
+	goos string
 }
 
 // syncBuffer is a bytes.Buffer safe for a writer and a reader in different goroutines.
@@ -68,17 +71,17 @@ func newHarness(t *testing.T, cfg string) *harness {
 	mid.FS = fstest.MapFS{"etc/machine-id": {Data: []byte(rawID)}}
 	hn := hostname.New()
 	hn.Hostname = func() (string, error) { return h.host.Load().(string), nil }
-	cpu := moduletest.WithProvider(moduletest.CPU(), 10*time.Second, func(context.Context) ([]module.Observation, error) {
-		n := h.cpuCalls.Add(1)
-		if h.cpuFail.Load() {
-			return nil, errors.New("cpu unavailable")
+	probe := moduletest.WithProvider(moduletest.Probe(), 10*time.Second, func(context.Context) ([]module.Observation, error) {
+		n := h.probeCalls.Add(1)
+		if h.probeFail.Load() {
+			return nil, errors.New("probe unavailable")
 		}
 		return []module.Observation{{Key: "usage", Value: float64(n)}, {Key: "arch", Value: "arm64"}, {Key: "model", Value: "fake"}}, nil
 	})
 	h.reg = module.NewRegistry()
 	h.reg.Register(mid, module.Required())
 	h.reg.Register(hn)
-	h.reg.Register(cpu)
+	h.reg.Register(probe)
 
 	h.cfg = t.TempDir() + "/omnistat.yaml"
 	if err := writeFile(h.cfg, cfg); err != nil {
@@ -89,7 +92,7 @@ func newHarness(t *testing.T, cfg string) *harness {
 }
 
 func (h *harness) app() *cli.App {
-	return &cli.App{Registry: h.reg, Version: "t", Clock: h.clock, MaxPerMetric: h.maxPerMetric}
+	return &cli.App{Registry: h.reg, Version: "t", Clock: h.clock, MaxPerMetric: h.maxPerMetric, GOOS: h.goos}
 }
 
 // logsSnapshot returns everything logged so far, including by a running daemon.
@@ -134,19 +137,19 @@ func TestRun_OnceFreshProject(t *testing.T) {
 		t.Fatalf("stdout: %s", r.stdout)
 	}
 	vals := h.srv.EntityValues(id)
-	if vals["hostname"] != "edge-fra-01" || vals["cpu_model"] != "fake" || vals["machine_id"] != machineid.Derive(rawID) {
+	if vals["hostname"] != "edge-fra-01" || vals["probe_model"] != "fake" || vals["machine_id"] != machineid.Derive(rawID) {
 		t.Fatalf("values: %v", vals)
 	}
 	arch := ""
 	for _, a := range h.srv.Attributes() {
-		if a.Slug == "cpu_arch" {
+		if a.Slug == "probe_arch" {
 			arch = a.OptionIDs["arm64"]
 		}
 	}
-	if arch == "" || vals["cpu_arch"] != arch {
-		t.Fatalf("list value must be the item id: %v (want %s)", vals["cpu_arch"], arch)
+	if arch == "" || vals["probe_arch"] != arch {
+		t.Fatalf("list value must be the item id: %v (want %s)", vals["probe_arch"], arch)
 	}
-	if m := h.srv.EntityMetrics(id)["cpu_usage_pct"]; len(m) != 1 || m[0].Value != "1" || m[0].UpdatedAt != "2026-09-22T10:00:00Z" {
+	if m := h.srv.EntityMetrics(id)["probe_usage_pct"]; len(m) != 1 || m[0].Value != "1" || m[0].UpdatedAt != "2026-09-22T10:00:00Z" {
 		t.Fatalf("metrics: %+v", m)
 	}
 	// Order: schema writes, then entity create, then PATCH, then metrics.
@@ -185,13 +188,13 @@ func TestRun_OnceFreshProject(t *testing.T) {
 // US-1/3, FR-018: a failing module → the rest is published, exit 2.
 func TestRun_OncePartial(t *testing.T) {
 	h := newHarness(t, "")
-	h.cpuFail.Store(true)
+	h.probeFail.Store(true)
 	r := h.exec(context.Background(), "run")
-	if r.code != cli.ExitPartial || !strings.Contains(r.stderr, "1 module(s) failed to collect: cpu") || !strings.Contains(r.stderr, "cpu unavailable") {
+	if r.code != cli.ExitPartial || !strings.Contains(r.stderr, "1 module(s) failed to collect: probe") || !strings.Contains(r.stderr, "probe unavailable") {
 		t.Fatalf("%+v", r)
 	}
 	id := h.entityID(t)
-	if v := h.srv.EntityValues(id); v["hostname"] != "edge-fra-01" || v["cpu_model"] != nil {
+	if v := h.srv.EntityValues(id); v["hostname"] != "edge-fra-01" || v["probe_model"] != nil {
 		t.Fatalf("values: %v", v)
 	}
 	if len(h.srv.EntityMetrics(id)) != 0 {
@@ -207,7 +210,7 @@ func TestRun_SchemaIncomplete(t *testing.T) {
 		if r.code != 1 || !strings.Contains(r.stderr, "schema is incomplete (schema.mode: "+mode+")") || !strings.Contains(r.stdout, "+ template host") {
 			t.Fatalf("%s: %+v", mode, r)
 		}
-		if h.cpuCalls.Load() != 0 || len(h.srv.Entities()) != 0 || len(h.writes("POST", "/")) != 0 {
+		if h.probeCalls.Load() != 0 || len(h.srv.Entities()) != 0 || len(h.writes("POST", "/")) != 0 {
 			t.Fatalf("%s: must not collect or write", mode)
 		}
 	}
@@ -229,13 +232,13 @@ func TestRun_DryRun(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	for _, want := range []string{"+ template host", "(dry-run: schema not applied)", "would publish to (entity to be created): 2 dimensions, 1 observations",
-		`hostname.hostname → hostname = "edge-fra-01" @ 2026-09-22T10:00:00Z`, `cpu.usage → cpu_usage_pct ← "1" @`} {
+		`hostname.hostname → hostname = "edge-fra-01" @ 2026-09-22T10:00:00Z`, `probe.usage → probe_usage_pct ← "1" @`} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("stdout should contain %q:\n%s", want, r.stdout)
 		}
 	}
 	// The list option cannot be mapped before the schema exists: dropped, logged, still no write.
-	if !strings.Contains(r.stderr, `list option \"arm64\" of cpu_arch has no item`) {
+	if !strings.Contains(r.stderr, `list option \"arm64\" of probe_arch has no item`) {
 		t.Errorf("expected the list drop in logs:\n%s", r.stderr)
 	}
 	for _, q := range h.srv.Requests() {
@@ -287,12 +290,12 @@ func TestRun_IntervalWithoutProvider(t *testing.T) {
 
 // FR-026/027: schedule logged at startup; values only at debug.
 func TestRun_Logs(t *testing.T) {
-	h := newHarness(t, "modules:\n  cpu:\n    interval: 15s\npublish:\n  interval: 45s\n")
+	h := newHarness(t, "modules:\n  probe:\n    interval: 15s\npublish:\n  interval: 45s\n")
 	r := h.exec(context.Background(), "run")
 	if r.code != 0 {
 		t.Fatalf("%+v", r)
 	}
-	for _, want := range []string{`msg="module scheduled" module=hostname interval=5m0s`, `msg="module scheduled" module=cpu interval=15s`,
+	for _, want := range []string{`msg="module scheduled" module=hostname interval=5m0s`, `msg="module scheduled" module=probe interval=15s`,
 		`msg="publish scheduled" interval=45s daemon=false dry_run=false`, `msg=published dimensions=3 observations=1 requests=2 dropped=0`, `msg=identity source=linux-machine-id`} {
 		if !strings.Contains(r.stderr, want) {
 			t.Errorf("logs should contain %q:\n%s", want, r.stderr)
@@ -303,5 +306,199 @@ func TestRun_Logs(t *testing.T) {
 	h.app().Run(context.Background(), []string{"--config", h.cfg, "run"}, &out, &errb, func(k string) string { return h.env[k] })
 	if strings.Contains(errb.String(), "edge-fra-01") || strings.Contains(errb.String(), "level=DEBUG") {
 		t.Fatalf("values leaked at info level:\n%s", errb.String())
+	}
+}
+
+// gatedHarness adds a module whose "temp" attribute is collectable on linux
+// only, and whose "usage" is collectable everywhere (spec 004 FR-018's shape).
+func gatedHarness(t *testing.T, cfg, goos string) *harness {
+	t.Helper()
+	h := newHarness(t, cfg)
+	h.goos = goos
+	m := module.Static{M: manifest.Manifest{Module: "sensor", Attributes: []manifest.Attribute{
+		{Key: "usage", Name: "Sensor usage", Slug: "sensor_usage_pct", Kind: manifest.KindMetric},
+		{Key: "temp", Name: "Sensor temperature", Slug: "sensor_temp_c", Kind: manifest.KindMetric,
+			Platforms: []string{"linux"}},
+	}}}
+	h.reg.Register(moduletest.WithProvider(m, 10*time.Second, func(context.Context) ([]module.Observation, error) {
+		// A well-behaved provider does not offer what the platform cannot
+		// report; this one offers both, so the core's safety net is exercised.
+		return []module.Observation{{Key: "usage", Value: 5.0}, {Key: "temp", Value: 42.0}}, nil
+	}))
+	return h
+}
+
+// FR-021/FR-023: what this platform cannot collect is said once at startup,
+// and an observation for it never becomes a per-tick error (FR-016).
+func TestRun_UncollectableAttributeIsReportedOnceNotPerTick(t *testing.T) {
+	h := gatedHarness(t, "", "windows")
+	r := h.exec(context.Background(), "run")
+	if r.code != 0 {
+		t.Fatalf("%+v", r)
+	}
+	logs := r.stderr
+	if n := strings.Count(logs, "attribute skipped: not collectable on this platform"); n != 1 {
+		t.Fatalf("skip must be reported exactly once, got %d:\n%s", n, logs)
+	}
+	for _, want := range []string{"module=sensor", "key=temp", "slug=sensor_temp_c", "platform=windows", "collectable_on=linux"} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("skip record should contain %q:\n%s", want, logs)
+		}
+	}
+	// FR-016: the provider offered `temp` anyway — that is not an omission and
+	// must not be logged as an error on every collection.
+	if strings.Contains(logs, "key not declared in manifest") {
+		t.Errorf("an uncollectable key must not be reported as undeclared:\n%s", logs)
+	}
+	// FR-020: the schema still carries it, whatever the platform.
+	if !strings.Contains(r.stdout, "schema reconciled") {
+		t.Fatalf("stdout: %s", r.stdout)
+	}
+	vals := h.srv.EntityMetrics(h.entityID(t))
+	if _, present := vals["sensor_temp_c"]; present {
+		t.Error("an uncollectable attribute must never be published")
+	}
+	if got := vals["sensor_usage_pct"]; len(got) != 1 {
+		t.Errorf("the collectable attribute must still be published: %v", got)
+	}
+}
+
+// FR-020: gating changes what is collected, never what is declared. The same
+// schema plan comes out of a windows host and a linux one.
+func TestRun_SchemaIsTheSameOnEveryPlatform(t *testing.T) {
+	plan := func(goos string) string {
+		h := gatedHarness(t, "", goos)
+		r := h.exec(context.Background(), "run", "--dry-run")
+		if r.code != 0 {
+			t.Fatalf("%s: %+v", goos, r)
+		}
+		return r.stdout
+	}
+	win, lin := plan("windows"), plan("linux")
+	for _, want := range []string{"+ attribute sensor_temp_c (metric)", "+ attribute sensor_usage_pct (metric)"} {
+		if !strings.Contains(win, want) || !strings.Contains(lin, want) {
+			t.Errorf("both platforms must plan %q", want)
+		}
+	}
+}
+
+// FR-021/FR-022: "disabled" and "not collectable here" are different states.
+// Disabling removes the schema too; the platform gate never does, and enabling
+// a module the platform cannot collect skips rather than fails.
+func TestRun_DisabledIsNotTheSameAsUncollectable(t *testing.T) {
+	// Disabled: no schema, no values, absent from the schedule.
+	h := gatedHarness(t, "modules:\n  sensor:\n    enabled: false\n", "linux")
+	r := h.exec(context.Background(), "run", "--dry-run")
+	if r.code != 0 {
+		t.Fatalf("%+v", r)
+	}
+	if strings.Contains(r.stdout, "sensor_temp_c") || strings.Contains(r.stderr, "module scheduled\" module=sensor") {
+		t.Errorf("a disabled module contributes nothing:\n%s%s", r.stdout, r.stderr)
+	}
+	if strings.Contains(r.stderr, "skipped: not collectable") {
+		t.Errorf("a disabled module is not a platform skip:\n%s", r.stderr)
+	}
+
+	// Explicitly enabled but uncollectable: skipped, not an error (FR-022).
+	h2 := gatedHarness(t, "modules:\n  sensor:\n    enabled: true\n    interval: 5s\n", "windows")
+	r2 := h2.exec(context.Background(), "run")
+	if r2.code != 0 {
+		t.Fatalf("enabling an uncollectable attribute must not fail the run: %+v", r2)
+	}
+	if !strings.Contains(r2.stderr, "attribute skipped") {
+		t.Errorf("expected a skip record:\n%s", r2.stderr)
+	}
+}
+
+// US-5/3: the dry-run explains an absent value instead of leaving the operator
+// to guess — as text once, and inside every JSON document for a script.
+func TestRun_DryRunShowsWhatThePlatformCannotCollect(t *testing.T) {
+	h := gatedHarness(t, "", "windows")
+	r := h.exec(context.Background(), "run", "--dry-run")
+	if r.code != 0 {
+		t.Fatalf("%+v", r)
+	}
+	if !strings.Contains(r.stdout, "not collectable on windows:") ||
+		!strings.Contains(r.stdout, "sensor.temp → sensor_temp_c (collectable on linux)") {
+		t.Fatalf("dry-run should explain the gap:\n%s", r.stdout)
+	}
+
+	h2 := gatedHarness(t, "", "windows")
+	r2 := h2.exec(context.Background(), "run", "--dry-run", "--json")
+	if r2.code != 0 {
+		t.Fatalf("%+v", r2)
+	}
+	var doc struct {
+		Version int `json:"version"`
+		Skipped []struct {
+			Module, Key, Slug string
+			Platforms         []string
+		} `json:"skipped"`
+	}
+	line := strings.TrimSpace(lastJSONLine(r2.stdout))
+	if err := json.Unmarshal([]byte(line), &doc); err != nil {
+		t.Fatalf("dry-run JSON: %v\n%s", err, r2.stdout)
+	}
+	if doc.Version != 1 || len(doc.Skipped) != 1 || doc.Skipped[0].Slug != "sensor_temp_c" ||
+		strings.Join(doc.Skipped[0].Platforms, ",") != "linux" {
+		t.Fatalf("skipped in JSON: %+v", doc)
+	}
+	// The text block is for humans; JSON callers get it in the document.
+	if strings.Contains(r2.stdout, "not collectable on windows:") {
+		t.Errorf("JSON mode must not emit the text block:\n%s", r2.stdout)
+	}
+}
+
+// lastJSONLine returns the last line of out that parses as a JSON object.
+func lastJSONLine(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "{") {
+			return lines[i]
+		}
+	}
+	return ""
+}
+
+// FR-024 (003 FR-026): collected values are logged at debug only. An operator
+// running at info must never see a host's readings in the log, and no record
+// may carry the token or the project id.
+func TestRun_ValuesAreDebugOnly(t *testing.T) {
+	h := gatedHarness(t, "", "linux")
+	r := h.exec(context.Background(), "run")
+	if r.code != 0 {
+		t.Fatalf("%+v", r)
+	}
+	for _, line := range strings.Split(r.stderr, "\n") {
+		if line == "" || strings.Contains(line, "level=DEBUG") {
+			continue
+		}
+		for _, secret := range []string{"edge-fra-01", omnitest.Token, omnitest.ProjectID} {
+			if strings.Contains(line, secret) {
+				t.Errorf("value or credential above debug level: %s", line)
+			}
+		}
+	}
+}
+
+// NFR-003: the publish request count depends on the publish interval and the
+// number of observations, never on how many modules or attributes there are.
+// Adding cpu-shaped modules must not add requests.
+func TestRun_RequestCountIsIndependentOfModules(t *testing.T) {
+	h := gatedHarness(t, "", "linux")
+	before := len(h.srv.Requests())
+	r := h.exec(context.Background(), "run")
+	if r.code != 0 {
+		t.Fatalf("%+v", r)
+	}
+	writes := 0
+	for _, req := range h.srv.Requests()[before:] {
+		if strings.HasPrefix(req.Path, "/entities/") && (req.Method == "PATCH" || strings.HasSuffix(req.Path, "/metrics")) {
+			writes++
+		}
+	}
+	// One dimension update plus one metric chunk, whatever the module count.
+	if writes != 2 {
+		t.Fatalf("a publish must cost 1 + ceil(n/1000) requests, got %d writes", writes)
 	}
 }
