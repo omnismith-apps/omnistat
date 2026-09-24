@@ -1,6 +1,6 @@
 package cpu
 
-import "errors"
+import "github.com/omnismith-apps/omnistat/internal/hostread"
 
 // errNoModel means the OS reported no model string at all (FR-009).
-var errNoModel = errors.New("no model reported")
+var errNoModel = hostread.ErrNoModel

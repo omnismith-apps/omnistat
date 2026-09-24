@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 ## [Unreleased]
 
 ### Added
+- `memory` module: `mem_used_pct` and `mem_available_mib` as metrics and `mem_total_mib` as a dimension, collected every 30s by default (feature 005). "Available" is the OS's own estimate of memory usable without swapping; amounts are whole MiB. macOS publishes only the total, because it maintains no available-memory estimate.
+- Spec 005 (`memory` module); ADR-0009 (host readings live in one core package).
 - `cpu` module — omnistat's first metric provider: `cpu_usage_pct` and the `load_avg_1/5/15` averages as metrics, `cpu_model`, `cpu_cores` and `cpu_arch` as dimensions, collected every 10s by default (feature 004).
 - Per-attribute platform support in manifests: an attribute declares where it can be collected, is skipped elsewhere with one startup message, and is declared in the schema everywhere so a mixed fleet converges on one schema (ADR-0007). Load averages are not collected on Windows, which maintains none.
 - Rate providers may keep the previous counter reading and prime themselves on the first call, so a one-shot `omnistat run` publishes a real CPU measurement rather than nothing (ADR-0006).
@@ -13,9 +15,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 - Spec 004 (`cpu` module); ADR-0006, ADR-0007, ADR-0008.
 
 ### Fixed
+- SDK bumped to `github.com/omnismith-sdk/go v1.0.15`. `GetEntityChart`'s `start`/`end` are now `int64`, so `EntityChart` no longer rejects times past January 2038.
+- Host-entity resolution no longer creates a duplicate when resolving right after a create. The platform processes writes asynchronously, so a new entity is briefly unsearchable. The re-search after a create now waits (bounded, about 3s) until it can see the entity it created, and then runs its concurrent-creation check (spec 002 FR-012, amended).
+- Schema reconciliation tolerates discovery lagging behind its own writes. List item ids are taken from the create response. Ids learned from writes are never dropped by a stale read. Objects this run created are not created again. A fleet-race re-read waits for the object before declaring it absent (spec 001 FR-024/FR-025, amended).
+- `cpu_usage_pct` and `mem_used_pct` are published rounded to two decimal places instead of full float precision (spec 004 FR-005, spec 005 FR-007, amended).
 - `modules.<name>.enabled: false` failed with `config: override for unknown module "<name>"` for every module. A config block carrying only `enabled` or `interval` was recorded as a schema override and then resolved against the manifests the switch had just removed; switches are no longer treated as overrides (spec 001 FR-006, US-4/1).
 
 ### Changed
+- Host readings for every value module now come from one core package, `internal/hostread`, the only importer of gopsutil; `cpu` moved onto it with no change in behaviour (ADR-0009). The one-record-per-collection omission report is shared as `module.Omissions`.
 - New dependency: `github.com/shirou/gopsutil/v4` supplies host readings for value modules, behind a narrow per-module interface (ADR-0008).
 
 - `omnistat run [--daemon] [--dry-run [--json]]`: reconcile → resolve the host entity → collect every module → publish; one-shot by default (exit 2 when a module failed), daemon mode with per-module collection intervals (`modules.<name>.interval`) and a publish interval (`publish.interval`), collection-time stamps, bounded in-memory buffering through outages, final flush on SIGTERM/SIGINT (feature 003).

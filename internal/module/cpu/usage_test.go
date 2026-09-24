@@ -117,7 +117,7 @@ func TestTimesSums(t *testing.T) {
 	if got := x.Total(); got != 255 {
 		t.Fatalf("Total = %v, want 255", got)
 	}
-	if got := x.IdleTime(); got != 24 {
+	if got := cpu.IdleTime(x); got != 24 {
 		t.Fatalf("IdleTime = %v, want 24 (idle + iowait)", got)
 	}
 }
@@ -273,5 +273,18 @@ func TestCollect_ReadErrorKeepsTheBaseline(t *testing.T) {
 	next := collectOK(t, m) // reads 700/2300 against the intact baseline
 	if got, ok := next["usage"].(float64); !ok || math.Abs(got-50) > 1e-9 {
 		t.Fatalf("baseline was disturbed: %v", next["usage"])
+	}
+}
+
+// FR-005: usage is published rounded to two decimal places — the precision of
+// the load averages the OS reports next to it — not as the full float64 of
+// the division (2.6550327204792796 in the first sandbox run).
+func TestCollect_UsageRoundedToTwoDecimals(t *testing.T) {
+	r := fake()
+	r.times = []cpu.Times{{User: 0, Idle: 0}, {User: 2, Idle: 1}} // 2 busy of 3: 66.666…
+	m := newTestModule(t, r)
+	obs := collectOK(t, m)
+	if got := obs["usage"]; got != 66.67 {
+		t.Fatalf("usage = %v, want 66.67", got)
 	}
 }

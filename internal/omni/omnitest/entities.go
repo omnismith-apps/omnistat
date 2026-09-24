@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -77,9 +78,10 @@ func (s *Server) searchEntities(w http.ResponseWriter, templateID string, body [
 		problem(w, 400, "Bad Request", "invalid payload", "")
 		return
 	}
+	s.searches++
 	var matches []*entity
 	for _, e := range s.entities {
-		if e.TemplateID != t.ID {
+		if e.TemplateID != t.ID || e.hiddenUntil >= s.searches {
 			continue
 		}
 		ok := len(req.FilterGroups) == 0
@@ -145,6 +147,7 @@ func (s *Server) createEntity(w http.ResponseWriter, templateRef string, body []
 		}
 	}
 	id := s.addEntityLocked(t.Slug, req.Attributes, "")
+	s.entityByID(id).hiddenUntil = s.searches + s.SearchLag // SearchLag: not searchable yet
 	writeJSON(w, 201, map[string]any{"id": id})
 }
 
@@ -162,6 +165,52 @@ func (s *Server) EntityValues(id string) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// getEntity is GET /entities/{id}: the entity's dimension values, projected
+// to `fields` when given (an array sent as `fields=a,b`, per the spec's
+// `style: form, explode: false`). Values are strings, as the real
+// API returns them. The default shape is a slug → value map; `verbose=true`
+// returns the array of {id, slug, value, custom_value} objects instead — both
+// verified against the local API (spec 005 T009).
+func (s *Server) getEntity(w http.ResponseWriter, id string, q url.Values) {
+	e := s.entityByID(id)
+	if e == nil {
+		problem(w, 404, "Not Found", "no entity "+id, "")
+		return
+	}
+	want := map[string]bool{}
+	if f := q.Get("fields"); f != "" {
+		for _, slug := range strings.Split(f, ",") {
+			want[slug] = true
+		}
+	}
+	slugs := make([]string, 0, len(e.Values))
+	for slug := range e.Values {
+		if len(want) == 0 || want[slug] {
+			slugs = append(slugs, slug)
+		}
+	}
+	sort.Strings(slugs)
+	var values any
+	if q.Get("verbose") == "true" || s.VerboseEntities {
+		arr := make([]map[string]any, 0, len(slugs))
+		for _, slug := range slugs {
+			v := fmt.Sprint(e.Values[slug])
+			arr = append(arr, map[string]any{"id": slug + "-id", "slug": slug, "value": v, "custom_value": v, "reference_entity_id": nil})
+		}
+		values = arr
+	} else {
+		m := make(map[string]string, len(slugs))
+		for _, slug := range slugs {
+			m[slug] = fmt.Sprint(e.Values[slug])
+		}
+		values = m
+	}
+	writeJSON(w, 200, map[string]any{
+		"id": e.ID, "template_id": e.TemplateID, "attribute_values": values,
+		"list_item_ids": map[string]string{}, "reference_entity_ids": map[string]string{}, "file_ids": map[string]string{},
+	})
 }
 
 // EntityHistory returns every dimension write an entity received, in order.

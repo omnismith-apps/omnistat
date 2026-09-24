@@ -151,7 +151,9 @@ neither its schema nor its values are produced there.
   time is the platform's idle counter plus, where the platform reports one, its I/O-wait
   counter; every other state counts as busy. The result MUST be clamped to `[0, 100]`
   and MUST be aggregate across all logical CPUs (a fully busy 8-core host reports 100,
-  not 800).
+  not 800). It MUST be published rounded to two decimal places (half away from zero),
+  the precision the OS reports load averages with. *(Amended 2026-09-24: values had
+  been published with full float precision, e.g. `2.6550327204792796`.)*
 - **FR-006** The load averages MUST be the values the operating system itself maintains,
   taken as-is. omnistat MUST NOT compute, smooth or synthesise them, and MUST NOT
   publish a substitute quantity under these slugs on a platform whose OS maintains no
@@ -381,7 +383,10 @@ Implemented per `plan.md`; `tasks.md` T001–T042 done. Deviations and findings:
 - **One unreproduced flake**: on the very first sandbox run — the one that created the
   cpu schema while the other sandbox tests ran concurrently against the same local API
   — `TestSandbox_Resolve` failed once. It has passed on every fresh run since (four
-  full-suite runs). Recorded rather than explained away.
+  full-suite runs). Recorded rather than explained away. *(Explained 2026-09-24: the
+  platform processes writes asynchronously, and identity's re-search ran before the new
+  entity was searchable. The concurrent schema creation was a coincidence. Fixed under
+  spec 002's amended FR-012.)*
 - **Not verified on macOS or Windows.** Those readings are covered by unit tests
   against a faked `Reader` and by the six-target `make crosscheck` gate, exactly as
   NFR-006 says. No omnistat acceptance run exists on either platform.

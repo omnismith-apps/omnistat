@@ -13,5 +13,6 @@ Numbered `NNNN-kebab-title.md`; never edit a decision after acceptance — super
 | [0006](0006-rate-providers-keep-their-previous-reading.md) | Rate providers keep their previous reading and prime themselves | accepted |
 | [0007](0007-platform-gating-declares-schema-everywhere.md) | Platform support is declared per attribute; the schema is declared everywhere | accepted |
 | [0008](0008-gopsutil-as-the-host-reading-source.md) | Host readings come from gopsutil, not from hand-written per-OS sources | accepted |
+| [0009](0009-host-readings-live-in-one-core-package.md) | Host readings live in one core package | accepted |
 
 Start from `../templates/adr.md`.

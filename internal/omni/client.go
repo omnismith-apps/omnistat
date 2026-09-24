@@ -155,10 +155,13 @@ func (c *Client) CreateAttribute(ctx context.Context, p schema.CreateAttributePa
 }
 
 // AddListOption implements schema.API.
-func (c *Client) AddListOption(ctx context.Context, attributeID, value string) error {
+func (c *Client) AddListOption(ctx context.Context, attributeID, value string) (string, error) {
 	req := omnismithsdk.NewAddListItemRequest(value)
-	_, resp, err := c.sdk.AttributesAPI.CreateAttributeItem(ctx, attributeID).AddListItemRequest(*req).Execute() //nolint:bodyclose // Execute drains and closes the body
-	return mapErr(fmt.Sprintf("add option %q", value), resp, err)
+	res, resp, err := c.sdk.AttributesAPI.CreateAttributeItem(ctx, attributeID).AddListItemRequest(*req).Execute() //nolint:bodyclose // Execute drains and closes the body
+	if err != nil {
+		return "", mapErr(fmt.Sprintf("add option %q", value), resp, err)
+	}
+	return res.GetId(), nil
 }
 
 // BindAttribute implements schema.API. The platform call replaces the

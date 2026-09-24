@@ -13,6 +13,7 @@ import (
 	"github.com/omnismith-apps/omnistat/internal/omni"
 	"github.com/omnismith-apps/omnistat/internal/omni/omnitest"
 	"github.com/omnismith-apps/omnistat/internal/schema"
+	"github.com/omnismith-apps/omnistat/internal/settle"
 )
 
 var quiet = slog.New(slog.DiscardHandler)
@@ -167,7 +168,7 @@ func TestApply_RaceObjectAbsent(t *testing.T) {
 	cur := mustRead(t, api)
 	srv.FailNext(omnitest.Fault{Method: "POST", PathPrefix: "/templates", Status: 409, Body: `{"title":"Conflict","status":409}`})
 
-	res, err := schema.Apply(context.Background(), api, desired(), cur, quiet)
+	res, err := schema.ApplyWith(context.Background(), api, desired(), cur, quiet, settle.None())
 	if !errors.Is(err, schema.ErrAlreadyExists) {
 		t.Fatalf("want original already-exists error, got %v", err)
 	}

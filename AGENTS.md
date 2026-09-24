@@ -88,6 +88,12 @@ make run ARGS="version"
   Full vocabulary: `specs/constitution.md`.
 - Dimensions are written with create/update/batch; **metrics are ingested** through
   `POST /entities/{id}/metrics` (accepted asynchronously, HTTP 202).
+- **Every write is processed asynchronously**, entity creation included: search, entity
+  reads, discovery and metric series lag behind a write the API already acknowledged
+  (about 100–300 ms measured). Take ids from write responses. When code must read back
+  its own write, wait boundedly with `internal/settle`. Never treat "not visible yet"
+  as "absent", and never re-create on that basis. Tests of such paths set the fake's
+  `SearchLag`/`SchemaLag`. Details: `docs/reference/omnismith-api-notes.md`.
 - Every call carries `Authorization: Bearer omni_…` and `X-Omnismith-Project-Id`.
 - Prefer **slugs** over UUIDs; resolve ids at startup from `GET /discovery/project-schema`.
 

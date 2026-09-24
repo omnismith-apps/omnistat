@@ -11,14 +11,14 @@ package cpu
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"log/slog"
+	"math"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/omnismith-apps/omnistat/internal/hostread"
 	"github.com/omnismith-apps/omnistat/internal/manifest"
 	"github.com/omnismith-apps/omnistat/internal/module"
 )
@@ -78,7 +78,7 @@ type Module struct {
 // New returns the module bound to the real host.
 func New() *Module {
 	return &Module{
-		Reader: gopsutilReader{},
+		Reader: hostread.CPU{},
 		GOOS:   runtime.GOOS,
 		Now:    time.Now,
 		Sleep:  sleep,
@@ -151,7 +151,7 @@ func (m *Module) Manifest() manifest.Manifest {
 // that could read nothing at all is a provider failure.
 func (m *Module) Collect(ctx context.Context) ([]module.Observation, error) {
 	var obs []module.Observation
-	om := &omissions{}
+	var om module.Omissions
 
 	// The architecture is a property of this build, not of the host, so it is
 	// the one value no reading can take away. An option the manifest does not
@@ -161,18 +161,18 @@ func (m *Module) Collect(ctx context.Context) ([]module.Observation, error) {
 	read := 0
 
 	if model, err := m.Reader.Model(ctx); err != nil {
-		om.add(KeyModel, err)
+		om.Add(KeyModel, err)
 	} else {
 		read++
 		if v := firstLine(model); v != "" {
 			obs = append(obs, module.Observation{Key: KeyModel, Value: v})
 		} else {
-			om.add(KeyModel, errNoModel)
+			om.Add(KeyModel, errNoModel)
 		}
 	}
 
 	if n, err := m.Reader.Counts(ctx); err != nil {
-		om.add(KeyCores, err)
+		om.Add(KeyCores, err)
 	} else {
 		read++
 		obs = append(obs, module.Observation{Key: KeyCores, Value: n})
@@ -182,7 +182,7 @@ func (m *Module) Collect(ctx context.Context) ([]module.Observation, error) {
 	// Elsewhere they are not collected and nothing is substituted for them.
 	if manifest.Collectable(loadPlatforms, m.goos()) {
 		if l, err := m.Reader.LoadAvg(ctx); err != nil {
-			om.add(KeyLoad1, err)
+			om.Add(KeyLoad1, err)
 		} else {
 			read++
 			obs = append(obs,
@@ -195,10 +195,10 @@ func (m *Module) Collect(ctx context.Context) ([]module.Observation, error) {
 	usage, gotUsage, err := m.usage(ctx)
 	switch {
 	case err != nil:
-		om.add(KeyUsage, err)
+		om.Add(KeyUsage, err)
 	case gotUsage:
 		read++
-		obs = append(obs, module.Observation{Key: KeyUsage, Value: usage})
+		obs = append(obs, module.Observation{Key: KeyUsage, Value: round2(usage)})
 	default:
 		// A reading happened, it just could not yield a percentage yet
 		// (FR-012's skipped prime, FR-013's unusable pair). Not an omission
@@ -209,9 +209,9 @@ func (m *Module) Collect(ctx context.Context) ([]module.Observation, error) {
 	if read == 0 {
 		// Nothing about this host could be read: an ordinary provider failure
 		// (FR-015, 003 FR-010). `arch` alone does not make a collection.
-		return nil, om.err()
+		return nil, om.Err(Name)
 	}
-	om.log(m.logger())
+	om.Log(m.logger(), Name)
 	return obs, nil
 }
 
@@ -295,6 +295,11 @@ func (m *Module) logger() *slog.Logger {
 	return slog.Default()
 }
 
+// round2 rounds a percentage to two decimal places, half away from zero: the
+// precision the OS reports load averages with, and ample for a value that is
+// charted and alerted on (FR-005). The full float64 of the division is noise.
+func round2(v float64) float64 { return math.Round(v*100) / 100 }
+
 // firstLine trims a reported string to its first non-empty line, so that a
 // multi-line model string becomes one dimension value (FR-009).
 func firstLine(s string) string {
@@ -302,31 +307,4 @@ func firstLine(s string) string {
 		s = s[:i]
 	}
 	return strings.TrimSpace(s)
-}
-
-// omissions gathers what a collection could not produce, so that it is
-// reported in one record rather than one per value (FR-016).
-type omissions struct {
-	keys    []string
-	reasons []string
-}
-
-func (o *omissions) add(key string, err error) {
-	o.keys = append(o.keys, key)
-	o.reasons = append(o.reasons, key+": "+err.Error())
-}
-
-func (o *omissions) log(log *slog.Logger) {
-	if len(o.keys) == 0 {
-		return
-	}
-	log.Error("observations omitted", "module", Name,
-		"keys", strings.Join(o.keys, ","), "reasons", strings.Join(o.reasons, "; "))
-}
-
-func (o *omissions) err() error {
-	if len(o.reasons) == 0 {
-		return errors.New("cpu: nothing could be read")
-	}
-	return fmt.Errorf("cpu: nothing could be read: %s", strings.Join(o.reasons, "; "))
 }

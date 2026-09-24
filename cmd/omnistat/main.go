@@ -17,6 +17,7 @@ import (
 	"github.com/omnismith-apps/omnistat/internal/module/cpu"
 	"github.com/omnismith-apps/omnistat/internal/module/hostname"
 	"github.com/omnismith-apps/omnistat/internal/module/machineid"
+	"github.com/omnismith-apps/omnistat/internal/module/memory"
 )
 
 // version is set at build time via -ldflags "-X main.version=...".
@@ -43,6 +44,7 @@ func registry() *module.Registry {
 	r.Register(machineid.New(), module.Required()) // spec 002 FR-002
 	r.Register(hostname.New())                     // spec 003 FR-023
 	r.Register(cpu.New())                          // spec 004 FR-002
+	r.Register(memory.New())                       // spec 005 FR-002
 	return r
 }
 

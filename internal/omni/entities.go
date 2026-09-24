@@ -3,7 +3,6 @@ package omni
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -82,14 +81,8 @@ type ChartPoint struct {
 // "1 minute", … ) — the default is "1 hour", which collapses a short run into
 // a single point. See docs/reference/omnismith-api-notes.md.
 func (c *Client) EntityChart(ctx context.Context, entityID string, attributeIDs []string, start, end time.Time, bucketWidth, aggregateFunc string) (map[string][]ChartPoint, error) {
-	from, err := epochSeconds(start)
-	if err != nil {
-		return nil, fmt.Errorf("entity chart start: %w", err)
-	}
-	to, err := epochSeconds(end)
-	if err != nil {
-		return nil, fmt.Errorf("entity chart end: %w", err)
-	}
+	from := epochSeconds(start)
+	to := epochSeconds(end)
 	req := c.sdk.EntityAPI.GetEntityChart(ctx, entityID).
 		AttributeIds(strings.Join(attributeIDs, ",")).
 		Start(from).
@@ -114,15 +107,44 @@ func (c *Client) EntityChart(ctx context.Context, entityID string, attributeIDs 
 	return out, nil
 }
 
-// epochSeconds renders a time the way the chart endpoint wants it. The SDK
-// types the parameter as int32, so the endpoint cannot address a time beyond
-// January 2038; rather than wrap silently, a time it cannot express is an
-// error. (Milliseconds are not an alternative: the endpoint accepts them and
+// epochSeconds renders a time the way the chart endpoint wants it.
+// (Milliseconds are not an alternative: the endpoint accepts them and
 // returns an empty series.)
-func epochSeconds(t time.Time) (int32, error) {
-	sec := t.Unix()
-	if sec < math.MinInt32 || sec > math.MaxInt32 {
-		return 0, fmt.Errorf("%s is outside the range the API can express (32-bit epoch seconds)", t.UTC().Format(time.RFC3339))
+func epochSeconds(t time.Time) int64 {
+	return t.Unix()
+}
+
+// EntityValues reads an entity's current dimension values (slug → value, as
+// the strings the API returns), projected to slugs when any are given. Like
+// EntityChart it is a read for sandbox acceptance only (spec 005 NFR-005):
+// omnistat never reads its own writes back in normal operation.
+//
+// The API returns attribute_values either as a slug → value map (the default)
+// or, verbose, as an array of {slug, value} objects; both are accepted.
+func (c *Client) EntityValues(ctx context.Context, entityID string, slugs ...string) (map[string]string, error) {
+	req := c.sdk.EntityAPI.GetEntity(ctx, entityID)
+	if len(slugs) > 0 {
+		// An array parameter declared `style: form, explode: false`, so the SDK
+		// sends `fields=a,b`. A bare repeated `fields=` would keep only the last.
+		req = req.Fields(slugs)
 	}
-	return int32(sec), nil
+	res, resp, err := req.Execute() //nolint:bodyclose // Execute drains and closes the body
+	if err != nil {
+		return nil, mapErr("get entity", resp, err)
+	}
+	out := map[string]string{}
+	av := res.GetAttributeValues()
+	if m := av.MapmapOfStringstring; m != nil {
+		for k, v := range *m {
+			out[k] = v
+		}
+	}
+	if arr := av.ArrayOfEntityAttributeValue; arr != nil {
+		for _, v := range *arr {
+			if slug := v.GetSlug(); slug != "" {
+				out[slug] = v.GetValue()
+			}
+		}
+	}
+	return out, nil
 }

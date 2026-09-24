@@ -83,7 +83,7 @@ func TestWrites(t *testing.T) {
 	if err != nil || aid == "" {
 		t.Fatalf("create attribute: %v", err)
 	}
-	if err := c.AddListOption(ctx, aid, "amd64"); err != nil {
+	if item, err := c.AddListOption(ctx, aid, "amd64"); err != nil || item == "" {
 		t.Fatalf("add option: %v", err)
 	}
 	mid, err := c.CreateAttribute(ctx, schema.CreateAttributeParams{Slug: "cpu_usage", Name: "Usage", Kind: manifest.KindMetric})
@@ -159,7 +159,7 @@ func TestErrorMapping(t *testing.T) {
 	if !errors.Is(err, schema.ErrAlreadyExists) {
 		t.Fatalf("plain 409 → already exists, got %v", err)
 	}
-	err = c.AddListOption(ctx, "nope", "v")
+	_, err = c.AddListOption(ctx, "nope", "v")
 	if !errors.Is(err, omni.ErrNotFound) {
 		t.Fatalf("404, got %v", err)
 	}

@@ -57,6 +57,31 @@ type Server struct {
 	Before func(r *http.Request)
 	// DenyWrites answers every mutating request with 403.
 	DenyWrites bool
+	// VerboseEntities makes GET /entities/{id} answer with the array shape of
+	// attribute_values, as the real API does for verbose=true.
+	VerboseEntities bool
+
+	// SearchLag and SchemaLag model the platform's asynchronous processing:
+	// the real API accepts a write before its reads reflect it (see
+	// docs/reference/omnismith-api-notes.md). An entity created through the
+	// API is invisible to the next SearchLag entity searches; a schema write
+	// (template, attribute, list option, binding) is invisible to the next
+	// SchemaLag discovery reads. Lag is counted in reads, not time, so tests
+	// stay deterministic. Zero (the default) is read-your-writes; any test of
+	// a path that reads back its own write should set a lag. Seeded state
+	// (AddEntity, AddTemplate, …) is visible at once.
+	SearchLag int
+	SchemaLag int
+	searches  int
+	schemaRd  int
+	pending   []pendingSchema
+}
+
+// pendingSchema is the discovery document as it was before a schema write
+// that discovery may not show yet.
+type pendingSchema struct {
+	hiddenUntil int // discovery reads up to and including this one see doc
+	doc         map[string]any
 }
 
 type template struct {
@@ -80,6 +105,8 @@ type entity struct {
 	History []Write
 	// Metrics records ingested observations per attribute slug.
 	Metrics map[string][]Observation
+	// hiddenUntil is the last search that does not see the entity (SearchLag).
+	hiddenUntil int
 }
 
 // Write is one recorded dimension write.
@@ -292,12 +319,16 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "GET" && path == "/auth/me/permissions":
 		writeJSON(w, 200, map[string]any{"data": s.permissions})
 	case r.Method == "POST" && path == "/templates":
+		s.noteSchemaWrite()
 		s.createTemplate(w, body)
 	case r.Method == "POST" && path == "/attributes":
+		s.noteSchemaWrite()
 		s.createAttribute(w, body)
 	case r.Method == "POST" && strings.HasPrefix(path, "/attributes/") && strings.HasSuffix(path, "/items"):
+		s.noteSchemaWrite()
 		s.createItem(w, strings.TrimSuffix(strings.TrimPrefix(path, "/attributes/"), "/items"), body)
 	case r.Method == "PATCH" && strings.HasPrefix(path, "/attributes/"):
+		s.noteSchemaWrite()
 		s.patchAttribute(w, strings.TrimPrefix(path, "/attributes/"), body)
 	case r.Method == "POST" && strings.HasPrefix(path, "/entities/search/"):
 		s.searchEntities(w, strings.TrimPrefix(path, "/entities/search/"), body)
@@ -305,6 +336,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.createEntity(w, strings.TrimPrefix(path, "/entities/template/"), body)
 	case r.Method == "POST" && strings.HasPrefix(path, "/entities/") && strings.HasSuffix(path, "/metrics"):
 		s.ingestMetrics(w, strings.TrimSuffix(strings.TrimPrefix(path, "/entities/"), "/metrics"), body)
+	case r.Method == "GET" && strings.HasPrefix(path, "/entities/") && !strings.Contains(strings.TrimPrefix(path, "/entities/"), "/"):
+		s.getEntity(w, strings.TrimPrefix(path, "/entities/"), r.URL.Query())
 	case r.Method == "PATCH" && strings.HasPrefix(path, "/entities/"):
 		s.updateEntity(w, strings.TrimPrefix(path, "/entities/"), body)
 	default:
@@ -313,6 +346,33 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) discovery(w http.ResponseWriter) {
+	s.schemaRd++
+	for len(s.pending) > 0 && s.pending[0].hiddenUntil < s.schemaRd {
+		s.pending = s.pending[1:]
+	}
+	if len(s.pending) > 0 {
+		// The earliest write this read cannot see yet, and everything after
+		// it, is absent: serve the document from before it.
+		writeJSON(w, 200, s.pending[0].doc)
+		return
+	}
+	writeJSON(w, 200, s.schemaDoc())
+}
+
+// LagSchemaLocked makes the schema change a Before hook is about to seed
+// (another actor's write) invisible to the next SchemaLag discovery reads,
+// like a write made through the API. Call it just before the seeding call.
+func (s *Server) LagSchemaLocked() { s.noteSchemaWrite() }
+
+// noteSchemaWrite records the discovery document before a schema write, so
+// that discovery keeps serving it for the next SchemaLag reads.
+func (s *Server) noteSchemaWrite() {
+	if s.SchemaLag > 0 {
+		s.pending = append(s.pending, pendingSchema{hiddenUntil: s.schemaRd + s.SchemaLag, doc: s.schemaDoc()})
+	}
+}
+
+func (s *Server) schemaDoc() map[string]any {
 	tpls := []map[string]any{}
 	for _, t := range s.templates {
 		attrs := []map[string]any{}
@@ -338,7 +398,7 @@ func (s *Server) discovery(w http.ResponseWriter) {
 		}
 		attrs = append(attrs, m)
 	}
-	writeJSON(w, 200, map[string]any{"project_id": s.projectID, "project_name": "omnitest", "templates": tpls, "attributes": attrs})
+	return map[string]any{"project_id": s.projectID, "project_name": "omnitest", "templates": tpls, "attributes": attrs}
 }
 
 func (s *Server) createTemplate(w http.ResponseWriter, body []byte) {

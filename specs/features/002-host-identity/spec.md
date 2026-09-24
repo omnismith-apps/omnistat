@@ -127,7 +127,13 @@ entity it resolves to, so that I can verify before the first apply and debug lat
 - **FR-011** If exactly one entity matches, it is the host entity.
 - **FR-012** If none matches, the core MUST create one entity on the host template with
   the identity attribute set, and MUST then re-search; if the re-search finds more than
-  one (concurrent creation), it MUST apply FR-013 rather than fail.
+  one (concurrent creation), it MUST apply FR-013 rather than fail. The platform processes
+  writes asynchronously, so a new entity is not searchable at once. The re-search MUST
+  therefore be repeated, within a short, bounded wait, until it shows the entity this
+  run created. If it never does within the wait, the run MUST continue with the entity
+  it created (or the oldest one it can see) and warn that the concurrent-creation check
+  was inconclusive; FR-013 resolves any duplicate on a later run.
+  *(Amended 2026-09-24.)*
 - **FR-013** If more than one entity matches, the core MUST select the one created
   earliest, MUST warn with all matching ids, and MUST NOT create or delete anything.
 - **FR-014** Entity creation MUST set only the identity attribute; it MUST NOT write
@@ -148,8 +154,9 @@ entity it resolves to, so that I can verify before the first apply and debug lat
   NOT record the raw OS machine id.
 
 ## Non-functional requirements
-- **NFR-001** (reliability) Resolution performs at most: one search, one create, one
-  re-search; all with deadlines and the retry policy of spec 001 NFR-003.
+- **NFR-001** (reliability) Resolution performs at most one search, one create, and a
+  bounded number of re-searches spread over a few seconds at most (FR-012), all with
+  deadlines and the retry policy of spec 001 NFR-003. *(Amended 2026-09-24.)*
 - **NFR-002** (safety) Resolution never deletes or replaces an entity (constitution IV).
 - **NFR-003** (portability) Discovery is a pure function of the OS files/APIs it reads
   and is tested with fakes; unsupported platforms fail with FR-006's message.
@@ -211,6 +218,19 @@ Implemented per `plan.md`; `tasks.md` T001–T010 done. Findings:
   confirming `eq` semantics); a duplicate created through the API made
   `identity` warn and pick the oldest; the raw `/etc/machine-id` value appeared
   nowhere in output or logs.
+
+## Amendment (2026-09-24): asynchronous platform
+
+`TestSandbox_Resolve` failed intermittently: once in feature 004, then 2 of 6 isolated
+runs in feature 005. The cause is that the platform processes writes asynchronously,
+and a newly created entity was measured as unsearchable for about 100–280 ms. The
+re-search of FR-012 ran immediately, so it neither found this run's entity nor
+detected a concurrent one, and the next resolution created a duplicate.
+
+FR-012 and NFR-001 were amended: the re-search now waits (up to about 3 s, backing off
+from 100 ms) until the run's own entity is visible. After the fix, `TestSandbox_Resolve`
+passed 10 of 10 runs. The fake API models the lag deterministically (`SearchLag`), and
+tests cover waiting, a lag beyond the budget, and a concurrent create under lag.
 
 ## Review checklist
 - [x] No implementation details (packages, libraries, signatures)

@@ -21,7 +21,7 @@ func Percent(prev, cur Times) (float64, bool) {
 	if total <= 0 {
 		return 0, false
 	}
-	busy := total - (cur.IdleTime() - prev.IdleTime())
+	busy := total - (IdleTime(cur) - IdleTime(prev))
 	pct := busy / total * 100
 	switch {
 	case pct < 0:

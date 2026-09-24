@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/goccy/go-yaml v1.19.2
-	github.com/omnismith-sdk/go v1.0.14
+	github.com/omnismith-sdk/go v1.0.15
 	github.com/shirou/gopsutil/v4 v4.26.8
 )
 

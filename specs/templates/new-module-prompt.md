@@ -111,6 +111,18 @@ Read the ADR when you need the reasoning; the operative rule is here.
 - **Test fixtures that return scripted readings advance per call.** When a code
   path takes one reading instead of two, the next call gets the next entry —
   get the indices right or you will "find" a bug that is in your fixture.
+- **The platform processes every write asynchronously.** A write is acknowledged
+  before search, entity reads, discovery and metric series show it (about
+  100–300 ms measured). A module never reads the API, but its acceptance test
+  does. Read back through the `eventually` helper in
+  `internal/cli/sandbox_test.go`, never with a single read. Core code that reads
+  its own write back uses `internal/settle` and is tested with the fake's
+  `SearchLag`/`SchemaLag`. This caused an unexplained sandbox flake in 004 and
+  005 before it was understood.
+- **Publish values at a sensible precision.** A percentage computed by division
+  is published rounded to two decimal places (`cpu_usage_pct`, `mem_used_pct`).
+  Amounts are whole units (`mem_*_mib`). Do not publish 16 significant digits of
+  float noise. Pin the rounding with a named test.
 - **Metrics**: creating a metric attribute needs no special handling. Reading
   one back through `GetEntityChart` needs epoch **seconds** (milliseconds return
   `200` with an empty series) and an explicit `bucket_width` (the default is

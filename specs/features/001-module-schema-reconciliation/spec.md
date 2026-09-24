@@ -179,9 +179,17 @@ and hosts without schema permissions to still work against an already-reconciled
 - **FR-024** If an action fails because another actor created the same object in the
   meantime (fleet race), apply MUST re-read the schema, treat the object as existing,
   and continue; the run MUST still succeed if the resulting schema matches the desired one.
+  Because the platform processes writes asynchronously, the object may not be visible
+  yet: the re-read MUST be repeated within a short, bounded wait before the object is
+  concluded absent, and only then is the original error reported.
+  *(Amended 2026-09-24.)*
 - **FR-025** After a successful apply (or verify), omnistat MUST hold, for every
   desired attribute and template, the platform identifier resolved from the final
-  schema, so that later features never look up slugs again during a run.
+  schema, so that later features never look up slugs again during a run. Identifiers
+  returned by this run's own writes (created templates, attributes and list items) are
+  authoritative. A later read that does not show them yet MUST NOT drop them. An object
+  this run created MUST NOT be created again because a read did not show it yet.
+  *(Amended 2026-09-24: platform reads lag writes.)*
 - **FR-026** If any action fails for a reason other than FR-024, apply MUST stop, report
   what was completed and what was not, and exit non-zero. Re-running MUST be safe and
   MUST pick up where it left off (idempotency via FR-014).
@@ -197,8 +205,9 @@ and hosts without schema permissions to still work against an already-reconciled
 - **NFR-001** (performance) Plan for ≤ 200 desired attributes against a project with
   ≤ 2 000 existing attributes completes in < 2 s on a typical VM, excluding network time.
 - **NFR-002** (network) Dry-run performs exactly one schema read (plus at most one
-  permission read); apply performs one schema read, one write per action, and at most
-  one re-read per FR-024 event.
+  permission read); apply performs one schema read, one write per action, and per
+  FR-024 event a bounded number of re-reads spread over a few seconds at most
+  (amended 2026-09-24).
 - **NFR-003** (reliability) Every API call has a deadline; transient failures (5xx,
   timeouts, 429) are retried with bounded jittered backoff, then surfaced.
 - **NFR-004** (safety) No API operation that deletes, replaces, renames or retypes is
@@ -274,6 +283,21 @@ Implemented per `plan.md`; `tasks.md` T001–T063 done. Deviations and findings:
   `OMNISMITH_PROJECT_ID`.
 - `make run ARGS="schema plan"` sources `./.env` for local development; the
   binary itself never reads `.env` (secrets come from the environment, IV).
+
+## Amendment (2026-09-24): asynchronous platform
+
+The platform processes writes asynchronously: a write is acknowledged before discovery
+and search reflect it. Found during feature 005 and confirmed by the platform owner.
+FR-024, FR-025 and NFR-002 were amended so that reconciliation never takes "not visible
+yet" for "absent":
+
+- A fleet-race re-read waits, within a bounded budget, for the object to appear.
+- Ids from this run's write responses, including list item ids, which the create
+  response now supplies, survive a lagging read.
+- The post-bind verification no longer re-creates objects this run already created.
+  Only binds are redone, because re-binding is additive.
+
+The fake API models the lag deterministically (`SchemaLag`), and tests cover each case.
 
 ## Review checklist
 - [x] No implementation details (packages, libraries, signatures)

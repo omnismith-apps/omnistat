@@ -53,7 +53,9 @@ func TestSandbox_Resolve(t *testing.T) {
 		t.Fatalf("create: %+v %v", h1, err)
 	}
 	t.Logf("created entity %s for identity %s", h1.EntityID, value)
-	// second run reuses
+	// second run reuses: Resolve waited until its create was searchable
+	// (writes are processed asynchronously, 002 FR-012), so an immediate
+	// second resolution finds it instead of creating a duplicate
 	h2, err := identity.Resolve(ctx, api, target, value, false, log)
 	if err != nil || h2.Created || h2.EntityID != h1.EntityID {
 		t.Fatalf("reuse: %+v %v", h2, err)

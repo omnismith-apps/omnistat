@@ -3,9 +3,15 @@
 Working notes for agents. Verify against the OpenAPI contract (`openapi.yaml` in the
 `omnismith-apps` workspace, API v1.0.12) and the SDK source when in doubt.
 
+> **Read this first: the platform processes every write asynchronously.** Reads
+> (search, entity, discovery, metric series) lag behind acknowledged writes. Take ids
+> from write responses, wait boundedly (`internal/settle`) when you must read your own
+> write back, and never re-create something because a read did not show it. See
+> *Writes are processed asynchronously* below.
+
 ## Go SDK
 
-- Module: `github.com/omnismith-sdk/go` (pinned: **v1.0.14**, `go 1.23`).
+- Module: `github.com/omnismith-sdk/go` (pinned: **v1.0.15**, `go 1.23`).
 - OpenAPI-generated, flat package. Import as `omnismithsdk "github.com/omnismith-sdk/go"`.
 - Construction:
   ```go
@@ -35,6 +41,7 @@ Working notes for agents. Verify against the OpenAPI contract (`openapi.yaml` in
 | `batchWriteEntities` | `POST /entities/batch` | Bulk create/update (`op` = create/update/replace/delete; `replace` clears omitted attrs) |
 | `ingestEntityMetrics` | `POST /entities/{id}/metrics` | Batch `metric_values` (`attribute_slug` or `attribute_id`, `value`); returns **202** — async pipeline |
 | `getEntityChart` | `GET /entities/{id}/chart` | Read a metric back as a series; see *Reading metrics back* below |
+| `getEntity` | `GET /entities/{id}` | Read dimension values back (sandbox acceptance only); see *Reading an entity back* below |
 
 ## Auth & tenancy
 
@@ -83,3 +90,73 @@ Working notes for agents. Verify against the OpenAPI contract (`openapi.yaml` in
   — the SDK's scalar union only has `float32`; dates `YYYY-MM-DD`; datetimes RFC 3339 UTC;
   list values as the **item id**) or a boolean. Metric ingestion is chunked at 1 000
   observations per request (our bound; the platform's is undocumented).
+
+## Host readings: memory (feature 005 spike, 2026-09-24)
+
+Not API facts, but recorded here with the other spike findings so a later module does
+not re-derive them. gopsutil v4.26.8, `mem.VirtualMemoryWithContext`:
+
+- **Linux** reads `/proc/meminfo` on every call: `Total` = `MemTotal`, `Available` =
+  `MemAvailable` (both × 1024). Verified byte-for-byte on the spike host (Linux 7.2); no goroutine is
+  started. `Used` = `Total − Available`. `Free` = `MemFree`, which excludes reclaimable
+  cache (1 GB free vs 22 GB available on the spike host), so it is useless for "near swap".
+  On kernels < 3.14 (no `MemAvailable`) gopsutil silently **emulates** `Available`, and
+  nothing in its result says so.
+- **Windows** calls `GlobalMemoryStatusEx` per call, with no state: `Total` = `ullTotalPhys`,
+  `Available` = `ullAvailPhys`. `Free` is set equal to `Available`, so it is a copy, not a
+  separate reading. `UsedPercent` is the OS's integer `dwMemoryLoad`.
+- **macOS** calls `host_statistics` + `hw.memsize` per call (plus gopsutil's dlopen-handle
+  cache, as for `cpu`). `Available` = free + inactive pages. That is gopsutil's
+  approximation, not an OS-maintained estimate: it ignores compressed and purgeable memory.
+- All six `make crosscheck` targets build with `CGO_ENABLED=0`.
+- The SDK decodes `GetEntityChart` values as **`float32`** (about 7 significant digits).
+  Whole-MiB values are exact up to 2²⁴ MiB (16 TiB). Byte-scale values would not be.
+
+## Writes are processed asynchronously — never assume read-your-writes
+
+**The platform processes writes asynchronously**, entity creation included. A write is
+acknowledged (`201`/`200`/`202`) before search, entity reads, metric series and
+discovery reflect it. This comes from the platform owner and matches what we measured.
+Measured on the local API (2026-09-24, feature 005): after
+`POST /entities/template/{t}`, a search for the new entity's unique value returned
+nothing for **about 100–280 ms**.
+
+What this means for any code or test in this repository:
+
+- **Take ids from write responses, not from a follow-up read.** Create template,
+  create attribute, create list item (`POST /attributes/{id}/items` → `{id}`) and create
+  entity all return the new id. `schema.Apply` records them. A later discovery read that
+  lacks them does not drop them (001 FR-025).
+- **When you must read back your own write, wait for it, bounded.** Use
+  `internal/settle`: read immediately, then back off from 100 ms, for about 3 s at most
+  (`settle.Default()`). Treat "not visible yet" as unknown, not as absent. Current users:
+  - identity's re-search after creating the host entity (002 FR-012);
+  - schema's re-read after a create refused as already existing (001 FR-024).
+- **Never re-create something because a read did not show it.** It may simply not be
+  processed yet (001 FR-025). Redoing an idempotent write, such as a re-bind, is fine.
+- **Tests:** the `omnitest` fake is read-your-writes by default. Set
+  `srv.SearchLag` / `srv.SchemaLag` (counted in reads, so it stays deterministic) to test
+  any path that reads back its own write. Sandbox tests read back through the
+  `eventually` helper in `internal/cli/sandbox_test.go`, never with a single read.
+- Metric ingestion was already documented as asynchronous (`202`). Wait for the series
+  too; do not expect the last observations of a run to be charted immediately.
+
+## Reading an entity back (verified 2026-09-24, feature 005)
+
+- **`GET /entities/{id}`**: by default `attribute_values` is a **slug → string map**
+  (`{"hostname": "fedora"}`). With `verbose=true` it is an **array** of
+  `{id, slug, value, custom_value, reference_entity_id}`. Number dimensions come back as
+  strings in both shapes (`"16"`, `"31820"`). The SDK decodes both through the
+  `EntityResponseAttributeValues` union; `omni.EntityValues` accepts either.
+- **`fields` is an array parameter.** The OpenAPI spec declares it
+  `type: array, style: form, explode: false`. In OpenAPI that means one parameter with
+  comma-separated values, `fields=a,b`, and that is why the generated SDKs
+  (openapi-generator, `omnismith-sdk-builder`) serialize it that way. The server
+  (`api-ng`, `GetEntity` controller) accepts the documented `fields=a,b`, and also
+  `fields[]=a&fields[]=b` for clients that send arrays PHP-style. A **bare repeated**
+  `fields=a&fields=b` is not an error, but PHP keeps only the last value, so only `b` is
+  returned. Verified live for all three forms. Use the SDK, or one of the two accepted
+  forms in a hand-built URL.
+- A whole-MiB number dimension (`mem_total_mib = 31820`) and whole-MiB metric values
+  read back exactly. Chart values come back through `float32`, so a two-decimal
+  percentage reads back as, for example, `54.52000045776367`.
