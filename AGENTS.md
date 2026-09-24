@@ -39,6 +39,7 @@ specs/                    ← source of truth (see specs/README.md)
   features/NNN-slug/      ← spec.md, plan.md, tasks.md per feature
   decisions/              ← ADRs
   templates/              ← copy to start a new spec/plan/tasks/ADR
+                             (new-module-prompt.md starts a new value module)
 docs/reference/           ← facts about Omnismith (API/SDK notes)
 cmd/omnistat/             ← main package only; no business logic
 internal/                 ← all application code, one package per concern (created by plans)

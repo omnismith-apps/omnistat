@@ -17,6 +17,7 @@ specs/
 │       └── research.md    # Optional: findings that informed the plan
 ├── decisions/             # Architecture Decision Records (ADRs)
 └── templates/             # Copy these to start a new spec / plan / tasks / ADR
+                          # new-module-prompt.md: the starting prompt for a value module
 ```
 
 ## Lifecycle
