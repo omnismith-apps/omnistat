@@ -231,15 +231,17 @@ func TestRun_DryRun(t *testing.T) {
 	if r.code != 0 {
 		t.Fatalf("%+v", r)
 	}
-	for _, want := range []string{"+ template host", "(dry-run: schema not applied)", "would publish to (entity to be created): 2 dimensions, 1 observations",
-		`hostname.hostname → hostname = "edge-fra-01" @ 2026-09-22T10:00:00Z`, `probe.usage → probe_usage_pct ← "1" @`} {
+	for _, want := range []string{"+ template host", "(dry-run: schema not applied)", "would publish to (entity to be created): 3 dimensions, 1 observations",
+		`hostname.hostname → hostname = "edge-fra-01" @ 2026-09-22T10:00:00Z`, `probe.usage → probe_usage_pct ← "1" @`,
+		`probe.arch → probe_arch = "arm64" @ 2026-09-22T10:00:00Z (option created by schema apply)`} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("stdout should contain %q:\n%s", want, r.stdout)
 		}
 	}
-	// The list option cannot be mapped before the schema exists: dropped, logged, still no write.
-	if !strings.Contains(r.stderr, `list option \"arm64\" of probe_arch has no item`) {
-		t.Errorf("expected the list drop in logs:\n%s", r.stderr)
+	// Amended 2026-09-25 (FR-021): a list option the schema plan would create is
+	// shown as what would be published, not dropped with an error.
+	if strings.Contains(r.stderr, "observation dropped") || strings.Contains(r.stderr, "dropped=1") {
+		t.Errorf("a planned list option must not be reported as dropped:\n%s", r.stderr)
 	}
 	for _, q := range h.srv.Requests() {
 		if q.Method != "GET" {

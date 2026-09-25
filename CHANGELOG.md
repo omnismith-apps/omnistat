@@ -27,6 +27,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 - Spec 004 (`cpu` module); ADR-0006, ADR-0007, ADR-0008.
 
 ### Fixed
+- `omnistat run --dry-run` on a project whose schema is not applied yet no longer reports `observation dropped` for a list value such as `cpu_arch`. A value whose option the shown plan would create is printed with `(option created by schema apply)`, or `"pending_option": true` in JSON. An option neither present nor planned is still an error (spec 003 FR-021, amended).
 - SDK bumped to `github.com/omnismith-sdk/go v1.0.15`. `GetEntityChart`'s `start`/`end` are now `int64`, so `EntityChart` no longer rejects times past January 2038.
 - Host-entity resolution no longer creates a duplicate when resolving right after a create. The platform processes writes asynchronously, so a new entity is briefly unsearchable. The re-search after a create now waits (bounded, about 3s) until it can see the entity it created, and then runs its concurrent-creation check (spec 002 FR-012, amended).
 - Schema reconciliation tolerates discovery lagging behind its own writes. List item ids are taken from the create response. Ids learned from writes are never dropped by a stale read. Objects this run created are not created again. A fleet-race re-read waits for the object before declaring it absent (spec 001 FR-024/FR-025, amended).

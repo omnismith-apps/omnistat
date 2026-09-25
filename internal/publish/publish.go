@@ -27,7 +27,11 @@ type Publisher struct {
 	EntityID string
 	// ListItems maps attribute slug → option value → list item id (FR-012a).
 	ListItems map[string]map[string]string
-	Log       *slog.Logger
+	// PendingOptions (dry-run only, with Printer) are list options the schema
+	// plan would create: slug → option value. Their values are printed as
+	// publishable rather than dropped (FR-021). Never used for a real publish.
+	PendingOptions map[string]map[string]bool
+	Log            *slog.Logger
 	// Printer, when set, receives what would be sent instead of the API
 	// (FR-021 dry-run). API may then be nil.
 	Printer *Printer
@@ -59,6 +63,11 @@ func (p *Publisher) Publish(ctx context.Context, b collect.Batch) (Result, error
 	dims := map[string]Backfill{}
 	var dimLines []Line
 	for _, s := range b.Dims {
+		if label, ok := s.Value.(string); ok && p.Printer != nil && s.Kind == manifest.KindList && p.PendingOptions[s.Slug][label] {
+			dims[s.Slug] = Backfill{Value: label, At: s.At}
+			dimLines = append(dimLines, Line{Module: s.Module, Key: s.Key, Slug: s.Slug, Value: label, At: s.At, PendingOption: true})
+			continue
+		}
 		v, err := Render(s, p.ListItems)
 		if err != nil {
 			log.Error("observation dropped", "module", s.Module, "key", s.Key, "slug", s.Slug, "error", err)

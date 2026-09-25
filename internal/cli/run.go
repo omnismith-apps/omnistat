@@ -78,6 +78,7 @@ func (a *App) run(e env, args []string) int {
 	pub := &publish.Publisher{API: p.api, EntityID: host.EntityID, ListItems: resolved.ListItems, Log: e.log}
 	if *dryRun {
 		pub.Printer = &publish.Printer{W: e.stdout, JSON: *asJSON, Skipped: skippedLines(skipped)}
+		pub.PendingOptions = schema.Diff(p.desired, p.current).PendingOptions()
 		printSkipped(e, skipped, a.goos(), *asJSON)
 	}
 	buf := collect.NewBuffer(a.MaxPerMetric)

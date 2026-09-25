@@ -277,6 +277,50 @@ func TestPublish_TransientKeepsBuffer(t *testing.T) {
 	}
 }
 
+// FR-021 (amended 2026-09-25): in a dry-run on a project whose schema is not
+// applied yet, a list option the plan would create is shown with its value and
+// marked, not dropped; an option neither present nor planned is still dropped.
+func TestPublish_DryRunPendingOption(t *testing.T) {
+	f := newFixture(t)
+	var out, logs bytes.Buffer
+	p := &publish.Publisher{EntityID: "", ListItems: map[string]map[string]string{},
+		PendingOptions: map[string]map[string]bool{"arch": {"riscv": true}},
+		Printer:        &publish.Printer{W: &out}, Log: slog.New(slog.NewTextHandler(&logs, nil))}
+	res, err := p.Publish(context.Background(), batchOf(sample(manifest.KindList, "arch", "riscv", 1)))
+	if err != nil || res.Dropped != 0 || res.Dimensions != 1 || len(f.newRequests()) != 0 {
+		t.Fatalf("res %+v err %v", res, err)
+	}
+	if want := `m.k_arch → arch = "riscv" @ 2026-09-22T10:00:01Z (option created by schema apply)`; !strings.Contains(out.String(), want) {
+		t.Fatalf("want %q in:\n%s", want, out.String())
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("no error for a planned option:\n%s", logs.String())
+	}
+
+	out.Reset()
+	p.Printer.JSON = true
+	if _, err := p.Publish(context.Background(), batchOf(sample(manifest.KindList, "arch", "riscv", 1))); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"value":"riscv"`) || !strings.Contains(out.String(), `"pending_option":true`) {
+		t.Fatalf("json: %s", out.String())
+	}
+
+	// Not planned, not present: real drift, still dropped with an error (FR-012a).
+	p.Printer.JSON = false
+	res, _ = p.Publish(context.Background(), batchOf(sample(manifest.KindList, "arch", "sparc", 1)))
+	if res.Dropped != 1 || !strings.Contains(logs.String(), `list option \"sparc\" of arch has no item`) {
+		t.Fatalf("drift must still drop: %+v\n%s", res, logs.String())
+	}
+
+	// A real publish never uses planned options: it maps to item ids only.
+	p.Printer = nil
+	res, _ = p.Publish(context.Background(), batchOf(sample(manifest.KindList, "arch", "riscv", 1)))
+	if res.Dropped != 1 {
+		t.Fatalf("outside dry-run a pending option cannot be sent: %+v", res)
+	}
+}
+
 // FR-021: the printer receives the rendered batch; nothing is sent; JSON carries a version.
 func TestPublish_DryRun(t *testing.T) {
 	f := newFixture(t)

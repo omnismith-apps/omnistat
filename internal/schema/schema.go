@@ -127,6 +127,23 @@ type Plan struct {
 // Empty reports whether the plan has neither actions nor conflicts.
 func (p Plan) Empty() bool { return len(p.Actions) == 0 && len(p.Conflicts) == 0 }
 
+// PendingOptions lists the list options the plan would add, as attribute slug →
+// option value. A dry-run shows values of these options as publishable instead
+// of dropping them (spec 003 FR-021).
+func (p Plan) PendingOptions() map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	for _, a := range p.Actions {
+		if a.Type != AddListOption {
+			continue
+		}
+		if out[a.Attribute] == nil {
+			out[a.Attribute] = map[string]bool{}
+		}
+		out[a.Attribute][a.Option] = true
+	}
+	return out
+}
+
 // Resolved maps desired slugs to platform ids after reconciliation (FR-025).
 // ListItems maps attribute slug → option value → list item id, which the
 // publisher needs to write list values (spec 003 FR-012a).

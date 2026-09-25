@@ -213,7 +213,13 @@ recognise hosts in Omnismith (the identity is an opaque token, 002 US-4).
   the writes: the schema plan is shown instead of applied, entity creation is reported
   instead of performed, and each publish prints module, attribute key, target slug,
   timestamp and value of everything that would be sent. Dry-run MUST be able to emit
-  JSON (carrying a `version` field) on request.
+  JSON (carrying a `version` field) on request. A `list` value whose option the shown
+  schema plan would create has no item id yet. It MUST be printed with its value and
+  marked as created by the schema apply (`pending_option` in JSON). It MUST NOT be
+  dropped with an error: once the plan is applied, it would be sent. An option that is
+  neither in the project nor in the plan is still dropped with an error (FR-012a).
+  *(Amended 2026-09-25: on an empty project the dry-run logged `observation dropped` for
+  `cpu_arch`, found during spec 006 acceptance.)*
 - **FR-022** Reconciliation mode `off` with a missing schema MUST fail at the first use
   with 001's missing-list message, before any collection.
 

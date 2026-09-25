@@ -176,3 +176,15 @@ func TestDiff_KindMapping(t *testing.T) {
 		}
 	}
 }
+
+// Spec 003 FR-021 (amended 2026-09-25): the list options a plan would add, for
+// the dry-run to show as publishable.
+func TestPlan_PendingOptions(t *testing.T) {
+	got := schema.Diff(desired(), schema.Current{}).PendingOptions()
+	if !got["cpu_arch"]["amd64"] || !got["cpu_arch"]["arm64"] || len(got) != 1 {
+		t.Fatalf("%v", got)
+	}
+	if got := (schema.Plan{}).PendingOptions(); len(got) != 0 {
+		t.Fatalf("empty plan: %v", got)
+	}
+}

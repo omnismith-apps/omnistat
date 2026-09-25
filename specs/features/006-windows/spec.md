@@ -442,6 +442,10 @@ Deviations from the plan:
     skips `_windows.go` files.
   - `scripts/release-notes.sh` lets a pre-release tag use the *Unreleased* section, so the
     acceptance build can be a published `-rc` without a changelog edit.
+- **Found in acceptance step 1 (not Windows-specific):** `run --dry-run` on an empty
+  project logged `observation dropped` for `cpu_arch`, because the option the plan would
+  create had no item id yet. Fixed in spec 003 (FR-021 amended), shipping in
+  `v0.1.0-rc.2`. The real run was never affected.
 - **Console stop keys (FR-024)** need no code: the Go runtime turns Ctrl+C and Ctrl+Break
   into SIGINT and closing the console into SIGTERM (plan, "Technical context"). The VM run
   verifies it.

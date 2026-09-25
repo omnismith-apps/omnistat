@@ -14,6 +14,9 @@ type Line struct {
 	Slug   string    `json:"slug"`
 	Value  any       `json:"value"`
 	At     time.Time `json:"at"`
+	// PendingOption: a list value whose option the dry-run's schema plan would
+	// create; shown by its value, since it has no item id yet (FR-021).
+	PendingOption bool `json:"pending_option,omitempty"`
 }
 
 // SkippedLine is one attribute — or, with an empty Key, one whole module —
@@ -67,7 +70,11 @@ func (p *Printer) Print(entityID string, dims, metrics []Line) {
 	}
 	fmt.Fprintf(p.W, "would publish to %s: %d dimensions, %d observations\n", target, len(dims), len(metrics))
 	for _, l := range dims {
-		fmt.Fprintf(p.W, "  %s.%s → %s = %s @ %s\n", l.Module, l.Key, l.Slug, format(l.Value), l.At.UTC().Format(time.RFC3339))
+		note := ""
+		if l.PendingOption {
+			note = " (option created by schema apply)"
+		}
+		fmt.Fprintf(p.W, "  %s.%s → %s = %s @ %s%s\n", l.Module, l.Key, l.Slug, format(l.Value), l.At.UTC().Format(time.RFC3339), note)
 	}
 	for _, l := range metrics {
 		fmt.Fprintf(p.W, "  %s.%s → %s ← %s @ %s\n", l.Module, l.Key, l.Slug, format(l.Value), l.At.UTC().Format(time.RFC3339))
