@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"path/filepath"
+	"path"
 	"slices"
 	"strings"
 
@@ -182,7 +182,9 @@ func planBinary(h Host, p *service.Plan, exe string) error {
 		if err != nil {
 			return "", err
 		}
-		if err := h.MkdirAll(filepath.Dir(BinaryPath), modeDir); err != nil {
+		// path, not filepath: these are paths on the Linux host, whatever
+		// the platform the plan is computed on (tests run on Windows too).
+		if err := h.MkdirAll(path.Dir(BinaryPath), modeDir); err != nil {
 			return "", err
 		}
 		return "", h.WriteFile(BinaryPath, data, modeBinary)
