@@ -233,3 +233,29 @@ func TestLoad_SwitchesAreNotSchemaOverrides(t *testing.T) {
 		t.Fatalf("real overrides must survive: %q", got)
 	}
 }
+
+// Spec 003 FR-026a: log.summary_interval — default 15m, 0 = every publish, else 1m…24h.
+func TestLoad_SummaryInterval(t *testing.T) {
+	s, err := config.Load("", env(nil))
+	if err != nil || s.Log.SummaryInterval != 15*time.Minute {
+		t.Fatalf("default: %v %v", s.Log.SummaryInterval, err)
+	}
+	for v, want := range map[string]time.Duration{"0": 0, "0s": 0, "1m": time.Minute, "2h": 2 * time.Hour} {
+		path := t.TempDir() + "/omnistat.yaml"
+		if err := writeFile(path, "log:\n  summary_interval: "+v+"\n"); err != nil {
+			t.Fatal(err)
+		}
+		if s, err := config.Load(path, env(nil)); err != nil || s.Log.SummaryInterval != want {
+			t.Errorf("%s: %v %v", v, s.Log.SummaryInterval, err)
+		}
+	}
+	for _, bad := range []string{"30s", "25h", "-1m", "often"} {
+		path := t.TempDir() + "/omnistat.yaml"
+		if err := writeFile(path, "log:\n  summary_interval: "+bad+"\n"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := config.Load(path, env(nil)); err == nil || !strings.Contains(err.Error(), "log.summary_interval") {
+			t.Errorf("%s must be rejected: %v", bad, err)
+		}
+	}
+}

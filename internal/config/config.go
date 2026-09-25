@@ -31,6 +31,10 @@ const DefaultPath = "omnistat.yaml"
 // Interval bounds (spec 003 FR-003, FR-013).
 const (
 	DefaultPublishInterval = 60 * time.Second
+	// Publish summary logging (spec 003 FR-026a).
+	DefaultSummaryInterval = 15 * time.Minute
+	MinSummaryInterval     = time.Minute
+	MaxSummaryInterval     = 24 * time.Hour
 	MinPublishInterval     = time.Second
 	MaxPublishInterval     = time.Hour
 	MinModuleInterval      = time.Second
@@ -69,6 +73,9 @@ type Settings struct {
 	Log struct {
 		Level  string
 		Format string
+		// SummaryInterval is how often the daemon logs a publish summary;
+		// 0 logs every publish at info (spec 003 FR-026a).
+		SummaryInterval time.Duration
 	}
 	// Identity is the static host identity, "" for autodiscovery (spec 002).
 	Identity string
@@ -104,8 +111,9 @@ type file struct {
 		Retries *int   `yaml:"retries"`
 	} `yaml:"http"`
 	Log struct {
-		Level  string `yaml:"level"`
-		Format string `yaml:"format"`
+		Level           string `yaml:"level"`
+		Format          string `yaml:"format"`
+		SummaryInterval string `yaml:"summary_interval"`
 	} `yaml:"log"`
 	Identity struct {
 		Static string `yaml:"static"`
@@ -149,6 +157,7 @@ func LoadWithDefault(path, defaultPath string, getenv func(string) string) (Sett
 	s.HTTP.Timeout = 15 * time.Second
 	s.HTTP.Retries = 3
 	s.Log.Level, s.Log.Format = "info", "text"
+	s.Log.SummaryInterval = DefaultSummaryInterval
 
 	var f file
 	if path == "" && defaultPath != "" {
@@ -266,6 +275,15 @@ func LoadWithDefault(path, defaultPath string, getenv func(string) string) (Sett
 			s.Log.Level = f.Log.Level
 		default:
 			add("log.level %q must be one of debug, info, warn, error", f.Log.Level)
+		}
+	}
+	if v := f.Log.SummaryInterval; v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d == 0 {
+			s.Log.SummaryInterval = 0
+		} else if d, err := parseInterval(v, MinSummaryInterval, MaxSummaryInterval); err != nil {
+			add("log.summary_interval: %v (or 0 to log every publish)", err)
+		} else {
+			s.Log.SummaryInterval = d
 		}
 	}
 	if f.Log.Format != "" {

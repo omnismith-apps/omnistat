@@ -236,6 +236,24 @@ recognise hosts in Omnismith (the identity is an opaque token, 002 US-4).
   observations sent, number of requests, duration, and outcome. Every dropped observation
   (FR-002, FR-008, FR-015) MUST be logged with its cause. Values themselves are logged at
   debug level only. No log line contains the token or the project id.
+- **FR-026a** How publishes are logged depends on the mode:
+  - **One-shot run:** its publish is logged at info.
+  - **Daemon:** a successful publish is logged at debug. At info, the daemon logs:
+    - the first successful publish after start;
+    - the first success after one or more failed publishes, with the number of failures;
+    - a **summary** every `log.summary_interval`. The summary carries the period and,
+      over it: the number of publishes, the dimensions, observations and requests they
+      sent, the dropped observations, the failed publishes and the longest duration. It
+      is logged even when nothing was published in the period, so it doubles as a
+      heartbeat.
+
+  A failed publish is logged at error when it happens, in both modes. On stop, the
+  summary of the unfinished period is logged before `stopped`. `log.summary_interval`
+  defaults to **15m**; `0` logs every publish at info, as before. Any other value must
+  be between 1m and 24h.
+  *(Added 2026-09-25: one info line per publish, 1 440 a day at the default interval,
+  crowded out other applications' events in the Windows Application log. Found during
+  spec 006 acceptance.)*
 - **FR-027** Startup MUST log the effective schedule: each enabled module with its
   collection interval, and the publish interval.
 

@@ -82,7 +82,8 @@ func (a *App) run(e env, args []string) int {
 		printSkipped(e, skipped, a.goos(), *asJSON)
 	}
 	buf := collect.NewBuffer(a.MaxPerMetric)
-	l := &loop{env: e, clock: clock, buf: buf, pub: pub, sources: sources, interval: p.settings.PublishInterval, timeout: p.settings.HTTP.Timeout}
+	l := &loop{env: e, clock: clock, buf: buf, pub: pub, sources: sources, interval: p.settings.PublishInterval, timeout: p.settings.HTTP.Timeout,
+		daemonMode: *daemon, summaryEvery: p.settings.Log.SummaryInterval}
 	if *daemon {
 		return l.daemon()
 	}
@@ -153,6 +154,53 @@ type loop struct {
 	sources  []collect.Source
 	interval time.Duration
 	timeout  time.Duration
+
+	// Publish logging in daemon mode (FR-026a).
+	daemonMode   bool
+	summaryEvery time.Duration // 0: every publish at info
+	stats        publishStats
+	succeeded    bool // a publish has succeeded since start
+	failStreak   int  // failed publishes since the last success
+}
+
+// publishStats accumulates daemon publishes between two summaries (FR-026a).
+type publishStats struct {
+	since                                       time.Time
+	publishes, failed, dims, obs, reqs, dropped int
+	maxDuration                                 time.Duration
+}
+
+func (st *publishStats) add(res publish.Result, d time.Duration, failed bool) {
+	if failed {
+		st.failed++
+	} else {
+		st.publishes++
+	}
+	st.dims += res.Dimensions
+	st.obs += res.Observations
+	st.reqs += res.Requests
+	st.dropped += res.Dropped
+	st.maxDuration = max(st.maxDuration, d)
+}
+
+// summaries reports whether the daemon logs publish summaries (FR-026a).
+func (l *loop) summaries() bool { return l.daemonMode && l.summaryEvery > 0 }
+
+// summarize logs the summary once the period is over, or at once when final
+// (on stop, for the unfinished period), and starts a new period.
+func (l *loop) summarize(final bool) {
+	if !l.summaries() {
+		return
+	}
+	now := l.clock.Now()
+	period := now.Sub(l.stats.since)
+	if !final && period < l.summaryEvery {
+		return
+	}
+	st := l.stats
+	l.env.log.Info("publish summary", "period", period, "publishes", st.publishes, "dimensions", st.dims, "observations", st.obs,
+		"requests", st.reqs, "dropped", st.dropped, "failed", st.failed, "max_duration", st.maxDuration)
+	l.stats = publishStats{since: now}
 }
 
 // once collects every module one time and publishes (FR-018).
@@ -189,6 +237,7 @@ func (l *loop) daemon() int {
 	case <-ctx.Done():
 	}
 	start := l.clock.Now()
+	l.stats = publishStats{since: start}
 	for ctx.Err() == nil {
 		if _, err := l.publish(ctx); err != nil {
 			if errors.Is(err, publish.ErrEntityGone) {
@@ -197,6 +246,7 @@ func (l *loop) daemon() int {
 			}
 			l.env.log.Error("publish failed; keeping the buffer", "error", err)
 		}
+		l.summarize(false)
 		// Next tick on the interval grid; ticks missed during a slow publish are skipped (FR-014).
 		elapsed := l.clock.Now().Sub(start)
 		next := start.Add(l.interval * (elapsed/l.interval + 1))
@@ -212,6 +262,7 @@ func (l *loop) daemon() int {
 	if _, err := l.publish(fctx); err != nil {
 		l.env.log.Warn("final publish failed", "error", err)
 	}
+	l.summarize(true)
 	l.env.log.Info("stopped")
 	return ExitOK
 }
@@ -230,12 +281,25 @@ func (l *loop) publish(ctx context.Context) (publish.Result, error) {
 	started := l.clock.Now()
 	res, err := l.pub.Publish(ctx, batch)
 	l.buf.Ack(batch, res.Ack)
-	attrs := []any{"dimensions", res.Dimensions, "observations", res.Observations, "requests", res.Requests, "dropped", res.Dropped, "duration", l.clock.Now().Sub(started)}
+	took := l.clock.Now().Sub(started)
+	attrs := []any{"dimensions", res.Dimensions, "observations", res.Observations, "requests", res.Requests, "dropped", res.Dropped, "duration", took}
+	l.stats.add(res, took, err != nil)
 	if err != nil {
 		l.env.log.Error("publish failed", append(attrs, "error", err)...)
+		l.failStreak++
 		return res, err
 	}
-	l.env.log.Info("published", attrs...)
+	// FR-026a: with summaries on, only the first success and a recovery are
+	// worth an info line; the summary carries the rest.
+	switch {
+	case !l.summaries(), !l.succeeded:
+		l.env.log.Info("published", attrs...)
+	case l.failStreak > 0:
+		l.env.log.Info("publish recovered", append(attrs, "after_failures", l.failStreak)...)
+	default:
+		l.env.log.Debug("published", attrs...)
+	}
+	l.succeeded, l.failStreak = true, 0
 	return res, nil
 }
 

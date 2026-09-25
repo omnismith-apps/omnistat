@@ -92,7 +92,7 @@ saves typed commands to its history file. For a scripted install the variable wo
 | Rotate the token | `service install --replace-token` |
 | Change the proxy | set `$env:HTTPS_PROXY`, then `service install` |
 | Start / stop | Services, `Start-Service omnistat`, `Stop-Service omnistat` (a stop publishes what is buffered first) |
-| Logs | Event Viewer → Windows Logs → Application, source `omnistat` |
+| Logs | Event Viewer → Windows Logs → Application, source `omnistat`: the first publish, then a `publish summary` every 15 minutes (`log.summary_interval`), plus any failure as it happens |
 | Remove | `service uninstall` (the config directory is kept; nothing is changed in the Omnismith project) |
 
 The binary is not code-signed yet, so SmartScreen may warn when you first run the
@@ -154,8 +154,16 @@ modules:
 identity:
   static: rack7-node3    # optional: pin the identity instead of autodiscovering it
 http: { timeout: 15s, retries: 3 }
-log:  { level: info, format: text }
+log:
+  level: info            # debug | info | warn | error
+  format: text           # text | json
+  summary_interval: 15m  # daemon: one "publish summary" line per period; 0 = log every publish
 ```
+
+In daemon mode, a successful publish is logged at `debug`. At `info` you see the first
+publish, a recovery after failures, and a `publish summary` every
+`log.summary_interval`. Failures and dropped observations are logged when they happen.
+A one-shot `omnistat run` logs its publish as before.
 
 Each module ships stable default slugs; overrides exist to fit an existing schema.
 Reconciliation only ever *creates* templates, attributes, list options and bindings.

@@ -446,6 +446,11 @@ Deviations from the plan:
   project logged `observation dropped` for `cpu_arch`, because the option the plan would
   create had no item id yet. Fixed in spec 003 (FR-021 amended), shipping in
   `v0.1.0-rc.2`. The real run was never affected.
+- **Found in acceptance step 5 (owner feedback):** one `published` info line per minute
+  crowded the Windows Application log. Spec 003 gained FR-026a: in daemon mode, publishes
+  are logged at debug, with the first publish, recoveries and a `publish summary` every
+  `log.summary_interval` (default 15m, `0` = old behaviour) at info. Ships in
+  `v0.1.0-rc.2`.
 - **Console stop keys (FR-024)** need no code: the Go runtime turns Ctrl+C and Ctrl+Break
   into SIGINT and closing the console into SIGTERM (plan, "Technical context"). The VM run
   verifies it.

@@ -35,6 +35,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 - `modules.<name>.enabled: false` failed with `config: override for unknown module "<name>"` for every module. A config block carrying only `enabled` or `interval` was recorded as a schema override and then resolved against the manifests the switch had just removed; switches are no longer treated as overrides (spec 001 FR-006, US-4/1).
 
 ### Changed
+- In daemon mode, successful publishes are logged at `debug`. At `info` the daemon logs the first publish, `publish recovered` after failures, and a `publish summary` every `log.summary_interval` (default `15m`; `0` restores one info line per publish). The summary gives publishes, dimensions, observations, requests, dropped, failed and the longest duration. Failures and drops are still logged when they happen, and one-shot runs are unchanged. As a Windows service this cuts the Application log from ~1 440 to ~100 omnistat events a day (spec 003 FR-026a).
 - Host readings for every value module now come from one core package, `internal/hostread`, the only importer of gopsutil; `cpu` moved onto it with no change in behaviour (ADR-0009). The one-record-per-collection omission report is shared as `module.Omissions`.
 - New dependency: `github.com/shirou/gopsutil/v4` supplies host readings for value modules, behind a narrow per-module interface (ADR-0008).
 

@@ -310,3 +310,66 @@ func TestDaemon_FinalPublishBounded(t *testing.T) {
 		t.Fatalf("%+v after %s", r, time.Since(started))
 	}
 }
+
+// Spec 003 FR-026a: in daemon mode, the first publish is logged at info, later
+// ones at debug; a summary every log.summary_interval; a failure at once, the
+// recovery at info; the unfinished period's summary on stop, before "stopped".
+func TestDaemon_LogSummary(t *testing.T) {
+	h := newHarness(t, "modules:\n  probe:\n    interval: 20s\npublish:\n  interval: 1m\nhttp:\n  retries: 0\nlog:\n  summary_interval: 3m\n")
+	d := h.daemon(context.Background())
+	h.parked(t)
+	infoPublished := func() int { return strings.Count(h.logsSnapshot(), "level=INFO msg=published ") }
+	if n := infoPublished(); n != 1 {
+		t.Fatalf("first publish at info: %d\n%s", n, h.logsSnapshot())
+	}
+	advance := func(steps int) { // 20s steps land on both the probe and the publish grid
+		for i := 0; i < steps; i++ {
+			h.clock.Advance(20 * time.Second)
+			h.parked(t)
+		}
+	}
+	advance(6) // t=120: publishes at 60 and 120, both at debug
+	if n := infoPublished(); n != 1 || strings.Count(h.logsSnapshot(), "level=DEBUG msg=published ") != 2 {
+		t.Fatalf("later publishes at debug:\n%s", h.logsSnapshot())
+	}
+	if strings.Contains(h.logsSnapshot(), "publish summary") {
+		t.Fatal("no summary before the interval")
+	}
+	advance(3) // t=180: 4th publish, then the 3m summary
+	if !strings.Contains(h.logsSnapshot(), `level=INFO msg="publish summary" period=3m0s publishes=4 `) || !strings.Contains(h.logsSnapshot(), " failed=0 ") {
+		t.Fatalf("summary:\n%s", h.logsSnapshot())
+	}
+
+	h.srv.FailNext(omnitest.Fault{Method: "PATCH", Status: 503, Times: 1})
+	advance(3) // t=240: fails
+	if !strings.Contains(h.logsSnapshot(), "level=ERROR msg=\"publish failed\"") {
+		t.Fatalf("failure at once:\n%s", h.logsSnapshot())
+	}
+	advance(3) // t=300: recovers
+	if !strings.Contains(h.logsSnapshot(), `level=INFO msg="publish recovered"`) || !strings.Contains(h.logsSnapshot(), "after_failures=1") {
+		t.Fatalf("recovery at info:\n%s", h.logsSnapshot())
+	}
+
+	r := d.stop(t)
+	final := strings.LastIndex(r.stderr, `msg="publish summary"`)
+	stopped := strings.LastIndex(r.stderr, "msg=stopped")
+	if r.code != 0 || final < 0 || stopped < final || !strings.Contains(r.stderr[final:], "failed=1") {
+		t.Fatalf("final summary before stopped, counting the failure:\n%s", r.stderr)
+	}
+}
+
+// FR-026a: log.summary_interval: 0 logs every publish at info, with no summaries.
+func TestDaemon_LogEveryPublish(t *testing.T) {
+	h := newHarness(t, "modules:\n  probe:\n    interval: 20s\npublish:\n  interval: 1m\nlog:\n  summary_interval: 0\n")
+	d := h.daemon(context.Background())
+	h.parked(t)
+	for i := 0; i < 6; i++ {
+		h.clock.Advance(20 * time.Second)
+		h.parked(t)
+	}
+	r := d.stop(t)
+	// Publishes at 0, 60 and 120; the final one on stop may find an empty buffer.
+	if n := strings.Count(r.stderr, "level=INFO msg=published "); n < 3 || strings.Contains(r.stderr, "publish summary") || strings.Contains(r.stderr, "level=DEBUG msg=published ") {
+		t.Fatalf("every publish at info: %d\n%s", n, r.stderr)
+	}
+}
