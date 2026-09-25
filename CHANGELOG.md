@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 ## [Unreleased]
 
 ### Added
+- Release pipeline: pushing a `vX.Y.Z` tag publishes a GitHub Release with static binaries for linux, darwin and windows on amd64 and arm64 (`tar.gz`, `zip` on Windows), plus `checksums.txt`. The tag's CHANGELOG section becomes the release notes. GoReleaser (`.goreleaser.yaml`) and `.github/workflows/release.yml`; `make release-snapshot` and `make release-check` run it locally.
 - `memory` module: `mem_used_pct` and `mem_available_mib` as metrics and `mem_total_mib` as a dimension, collected every 30s by default (feature 005). "Available" is the OS's own estimate of memory usable without swapping; amounts are whole MiB. macOS publishes only the total, because it maintains no available-memory estimate.
 - Spec 005 (`memory` module); ADR-0009 (host readings live in one core package).
 - `cpu` module — omnistat's first metric provider: `cpu_usage_pct` and the `load_avg_1/5/15` averages as metrics, `cpu_model`, `cpu_cores` and `cpu_arch` as dimensions, collected every 10s by default (feature 004).

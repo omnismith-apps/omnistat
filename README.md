@@ -18,6 +18,25 @@ metric time series, dashboards and automations). `omnistat` is the first app in 
 `omnismith-apps` organisation and doubles as a dogfooding exercise for the official
 Go SDK, [`github.com/omnismith-sdk/go`](https://github.com/omnismith-sdk/go).
 
+## Install
+
+Download the archive for your OS and CPU from
+[Releases](https://github.com/omnismith-apps/omnistat/releases) and check it against
+`checksums.txt`. Each archive holds one static binary (`omnistat`, or `omnistat.exe` on
+Windows), with `README.md`, `CHANGELOG.md` and `.env.example`.
+
+| OS | amd64 (x86-64) | arm64 |
+|----|----------------|-------|
+| Linux | `omnistat_<ver>_linux_amd64.tar.gz` | `omnistat_<ver>_linux_arm64.tar.gz` |
+| macOS | `omnistat_<ver>_darwin_amd64.tar.gz` (Intel) | `omnistat_<ver>_darwin_arm64.tar.gz` (Apple silicon) |
+| Windows | `omnistat_<ver>_windows_amd64.zip` | `omnistat_<ver>_windows_arm64.zip` |
+
+The binaries are not code-signed yet. On macOS, clear the quarantine flag once with
+`xattr -d com.apple.quarantine ./omnistat`. On Windows, SmartScreen may warn about
+an unknown publisher the first time the binary runs.
+
+To build from source instead, run `make build` (Go 1.26).
+
 ## Quick start
 
 ```bash
@@ -117,6 +136,20 @@ and nothing is written.
 1. Draft or pick a spec in `specs/features/`.
 2. Plan → tasks → implement, following `AGENTS.md`.
 3. `make all` must pass; CI runs the same gate plus `scripts/check-specs.sh`.
+
+## Releasing
+
+1. In `CHANGELOG.md`, move the *Unreleased* entries under a new `## [X.Y.Z] - YYYY-MM-DD`
+   heading.
+2. Commit, then tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+3. `.github/workflows/release.yml` runs the tests, builds every target with
+   [GoReleaser](https://goreleaser.com) (`.goreleaser.yaml`), and publishes a GitHub
+   Release with the archives, `checksums.txt`, and that changelog section as its notes.
+   The job fails if the tag has no changelog section. A tag with a suffix
+   (`v0.2.0-rc.1`) is published as a pre-release.
+
+`make release-snapshot` builds the same archives into `dist/` without publishing
+anything, and `make release-check` validates the config.
 
 ## License
 

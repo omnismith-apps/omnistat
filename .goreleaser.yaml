@@ -1,0 +1,45 @@
+# GoReleaser config: one static binary per target (constitution V), archived with
+# checksums and attached to a GitHub Release. Driven by .github/workflows/release.yml
+# on a `v*` tag; `make release-snapshot` builds the same artifacts locally into dist/.
+version: 2
+project_name: omnistat
+
+builds:
+  - id: omnistat
+    main: ./cmd/omnistat
+    binary: omnistat
+    env:
+      - CGO_ENABLED=0
+    # Same pairs as `make crosscheck`.
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    # {{.Tag}} keeps the leading "v", matching what `make build` gets from git describe.
+    ldflags:
+      - -s -w -X main.version={{ .Tag }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - CHANGELOG.md
+      - .env.example
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+# Release notes come from CHANGELOG.md (scripts/release-notes.sh), not from commits.
+changelog:
+  disable: true
+
+release:
+  prerelease: auto

@@ -2,8 +2,9 @@ BINARY   := omnistat
 MODULE   := github.com/omnismith-apps/omnistat
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  := -s -w -X main.version=$(VERSION)
+GORELEASER := go run github.com/goreleaser/goreleaser/v2@v2.17.1
 
-.PHONY: all build crosscheck run test test-race lint vet fmt tidy sandbox specs-check clean help
+.PHONY: all build crosscheck release-check release-snapshot run test test-race lint vet fmt tidy sandbox specs-check clean help
 
 # Every target constitution V requires a static binary for, plus the Windows pairs
 # that 004 NFR-005 keeps compiling so the cross-platform readings cannot rot.
@@ -22,6 +23,12 @@ crosscheck: ## Verify the binary builds CGO-free for every target (004 NFR-005)
 	  CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch go build -trimpath -o /dev/null ./cmd/$(BINARY); \
 	  echo ok; \
 	done
+
+release-check: ## Validate .goreleaser.yaml
+	$(GORELEASER) check
+
+release-snapshot: ## Build every release archive locally into dist/ (nothing is published)
+	$(GORELEASER) release --snapshot --clean
 
 run: ## Run from source: make run ARGS="schema plan" (sources ./.env if present)
 	@set -a; [ -f .env ] && . ./.env; set +a; go run ./cmd/$(BINARY) $(ARGS)

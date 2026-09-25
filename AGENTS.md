@@ -75,6 +75,7 @@ make all           # fmt + vet + lint + test + build (CI parity)
 make test-race     # tests with race detector + coverage
 make specs-check   # validate specs layout/frontmatter
 make run ARGS="version"
+make release-snapshot  # every release archive into dist/, nothing published
 ```
 
 ## 5. Omnismith domain in 30 seconds
