@@ -1,6 +1,6 @@
 ---
 feature: 006-windows
-status: approved          # draft | approved | done
+status: done              # draft | approved | done
 approved: 2026-09-25
 spec: ./spec.md
 created: 2026-09-25

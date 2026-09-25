@@ -99,9 +99,12 @@ type Host interface {
 	Service(ctx context.Context) (Installed, error)
 	// CopyBinary installs src at dst, replacing an existing file (FR-007, FR-017).
 	CopyBinary(src, dst string) error
-	// RemoveBinary deletes path and its directory if empty; deferred reports
-	// that the file is in use and will be deleted at the next restart (FR-020).
-	RemoveBinary(path string) (deferred bool, err error)
+	// RemoveBinary deletes path and its directory if empty (FR-020). When path
+	// is the running program it cannot be deleted: it is moved aside and
+	// leftover names the moved file, which Windows deletes at the next restart.
+	// path itself is never scheduled for deletion, so a reinstall before that
+	// restart keeps its binary.
+	RemoveBinary(path string) (leftover string, err error)
 	// EnsureConfigDir creates path if needed and restricts writing to
 	// Administrators and SYSTEM; tightened reports that permissions changed (FR-012).
 	EnsureConfigDir(path string) (tightened bool, err error)

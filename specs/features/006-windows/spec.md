@@ -1,7 +1,8 @@
 ---
 feature: 006-windows
-status: approved           # draft | review | approved | implemented | superseded
+status: implemented        # draft | review | approved | implemented | superseded
 approved: 2026-09-25
+implemented: 2026-09-25
 created: 2026-09-25
 owners: [evgenii]
 supersedes: null
@@ -233,7 +234,11 @@ from a Linux shell, so that I can try things before installing the service.
   the service (FR-021), then remove the service registration, the stored settings, the
   event-source registration (FR-026) and the installed binary. It MUST keep the config
   directory and file. If the installed binary cannot be removed because it is the one
-  running, uninstall MUST say exactly what remains and how to remove it. With no
+  running, uninstall MUST say exactly what remains and how to remove it. It MUST NOT
+  leave the installed binary's own path scheduled for deletion: a reinstall before the
+  next restart must keep its binary. *(Amended 2026-09-25: acceptance showed the running
+  binary scheduled for deletion at restart in place, which would delete a binary
+  reinstalled before that restart. The running binary is now moved aside first.)* With no
   installed service it says so and exits 0. It never touches the Omnismith project, and
   the host entity remains (constitution IV).
 
@@ -413,11 +418,60 @@ and permission scope with the first client:
 
 None.
 
-## Implementation notes (2026-09-25, in progress)
+## Implementation notes (2026-09-25)
 
-T001–T043, T049 and T051 are done locally. `make all crosscheck` is green, and golangci-lint
-is clean for the Windows build too. **Not yet verified:** the Windows CI job (it waits for
-the owner's push) and acceptance (T050, the owner's VM, runbook `acceptance.md`).
+All tasks are done. `make all crosscheck` is green, and golangci-lint is clean for the
+Windows build too.
+
+**Acceptance (T050, NFR-005)** was run by the owner on 2026-09-25, on a `windows/amd64` VM
+(Windows with a Russian UI; 2 × Xeon E5645, 24 logical CPUs, 16 GiB), against a dedicated
+production project, from `v0.1.0-rc.1`. The owner confirmed it as a whole. Recorded:
+
+- **Step 1:** identity `windows-machine-guid`, stable throughout. The `load_avg_*`
+  attributes were skipped once each. The readings were consistent: 24 cores,
+  16374 MiB total, 49.31% used, 8299 MiB available. The dry-run's `cpu_arch` error was
+  a 003 bug (below).
+- **Step 2:** closing the console window stopped the publishing. Whether the final
+  publish landed before Windows ended the process was not established; the spec accepts
+  that loss.
+- **Steps 3–5:**
+  - refused without elevation (exit 1);
+  - dry-run identical to the real install, with no token shown and nothing installed;
+  - installed and running, with Event Log entries and data arriving.
+- **Step 6:** `sc qc` showed `AUTO_START (DELAYED)`, the quoted binary with
+  `run --daemon`, and `NT SERVICE\omnistat`. `qfailure` showed three 60000 ms restarts
+  with an 86400 s reset, and `qfailureflag` was TRUE. The stored setting names were
+  `OMNISMITH_ACCESS_TOKEN` and `OMNISMITH_PROJECT_ID`. The config directory had SYSTEM,
+  Administrators and Authenticated Users.
+- **Step 7 (FR-015, NFR-001):** as the standard user `omnistd`:
+  - `reg query` on the service key was **denied**;
+  - `sc qc` worked;
+  - writing `omnistat.yaml` and creating a file in the config directory were **denied**;
+  - replacing the installed binary was **denied**.
+- **Steps 8–14:** confirmed: values, Event Viewer, stop (0.5 s, clean, no restart
+  after a deliberate stop), crash restart, revoked token, token rotation and reboot. The
+  Application log is readable by every local user, as Windows intends; omnistat logs no
+  secrets (FR-016).
+- **Steps 15–16:** upgrade confirmed. Uninstall stopped the service, whose final publish
+  and summary were logged, and removed it. The in-use binary was reported as removed at
+  the next restart; the owner could not reboot to see it go. That report exposed the
+  FR-020 bug below.
+
+Found in acceptance and fixed after it:
+
+- **FR-020, uninstall from the installed copy.** The running binary was scheduled for
+  deletion at restart **at its installed path**. A reinstall before that restart would
+  have lost its fresh binary at boot. Now the running binary is moved to
+  `%SystemRoot%\Temp` (or, failing that, renamed next to itself). The program directory
+  is removed at once, and only the moved file is deleted at restart. The owner has not
+  run this fix on Windows yet: **to verify in the next rc** (runbook step 16).
+- **Service key ACL shows `ALL APPLICATION PACKAGES` (read)** next to SYSTEM and
+  Administrators, although install writes a protected SYSTEM/Administrators-only DACL.
+  It is not a gap. An AppContainer process needs its user **and** its package granted,
+  and no user other than SYSTEM or an administrator is granted, which step 7 confirmed.
+  Where the entries come from was not established. The runbook now expects them.
+- **Runbook:** `New-Item` needs `-ItemType File` on the owner's PowerShell version.
+
 Deviations from the plan:
 
 - **Pre-check and an empty project (FR-006).** `omnistat identity` fails on a project whose

@@ -250,6 +250,7 @@ module `memory`. No other module may declare them.
   a Mac.
 - cgroup- or container-aware memory, per-process memory, NUMA.
 - omnistat running on Windows (identity and shutdown are unspecified there; 004).
+  *(Done in 006; the Windows readings were first run in its acceptance, 2026-09-25.)*
 - Alerting, thresholds, dashboards or automations built on these metrics.
 
 ## Decisions taken during review (2026-09-24)

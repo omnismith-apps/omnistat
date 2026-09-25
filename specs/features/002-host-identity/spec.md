@@ -90,7 +90,8 @@ entity it resolves to, so that I can verify before the first apply and debug lat
 
 **Acceptance scenarios**
 1. **Given** any configuration, **When** I run the identity inspection command, **Then**
-   I see the identity value, its source (`static`, `linux-machine-id`, `darwin-platform-uuid`),
+   I see the identity value, its source (`static`, `linux-machine-id`, `darwin-platform-uuid`,
+   `windows-machine-guid`),
    and — if a project is reachable — whether an entity with it exists and which one,
    with nothing written.
 
@@ -107,7 +108,8 @@ entity it resolves to, so that I can verify before the first apply and debug lat
 ### Discovery
 - **FR-004** On Linux the provider MUST read the OS machine id from the system machine-id
   file, falling back to the D-Bus machine-id file; on macOS it MUST use the platform UUID
-  reported by the OS. Values are trimmed; an empty or all-zero value counts as absent.
+  reported by the OS; on Windows, the machine GUID Windows keeps for the installation
+  (spec 006 FR-002–FR-004). Values are trimmed; an empty or all-zero value counts as absent.
 - **FR-005** Autodiscovery MUST NOT be attempted when a static identity is configured.
 - **FR-006** If neither a static identity nor an OS id is available, startup MUST fail
   with an actionable error (US-3/1). omnistat MUST NEVER generate a random identity.
@@ -185,7 +187,7 @@ Write: one entity on the host template with `{ identity attribute: value }`.
 
 - Publishing any value other than the identity (feature 003).
 - Persisting a generated identity on disk as a fallback (explicitly rejected, FR-006).
-- Windows discovery.
+- ~~Windows discovery~~: specified by 006 (FR-002–FR-004).
 - Cloud instance ids (AWS/GCP/Hetzner metadata) as identity sources — a possible future
   provider option, not part of this feature.
 - Merging or deduplicating existing entities.

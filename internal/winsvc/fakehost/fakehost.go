@@ -28,8 +28,9 @@ type Host struct {
 	// Secret answers PromptSecret; SecretErr fails it (e.g. ErrNotInteractive).
 	Secret    string
 	SecretErr error
-	// InUse lists binaries that cannot be deleted now (the running program).
-	InUse map[string]bool
+	// InUse maps a binary that cannot be deleted now (the running program) to
+	// where RemoveBinary moves it.
+	InUse map[string]string
 	// LooseConfigDir makes EnsureConfigDir report that it tightened permissions.
 	LooseConfigDir bool
 	// Fail makes the named method return the error.
@@ -106,7 +107,7 @@ func (h *Host) Service(context.Context) (winsvc.Installed, error) {
 func (h *Host) CopyBinary(src, dst string) error { return h.record("CopyBinary %s -> %s", src, dst) }
 
 // RemoveBinary implements winsvc.Host.
-func (h *Host) RemoveBinary(path string) (bool, error) {
+func (h *Host) RemoveBinary(path string) (string, error) {
 	err := h.record("RemoveBinary %s", path)
 	return h.InUse[path], err
 }

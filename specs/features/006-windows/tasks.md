@@ -1,6 +1,6 @@
 ---
 feature: 006-windows
-status: in-progress      # draft | in-progress | done
+status: done             # draft | in-progress | done
 plan: ./plan.md
 ---
 
@@ -96,7 +96,7 @@ runs when the owner pushes. A Windows failure then reopens the task it belongs t
   exact PowerShell commands and an expected result per step, and a results table for the
   owner to fill in. It ends with what to send back. (files: `acceptance.md`) — verify:
   every NFR-005 item and every T050 step below is covered.
-- [ ] T050 VM acceptance, run **by the owner** on their own `windows/amd64` VM against a
+- [x] T050 VM acceptance, run **by the owner** on their own `windows/amd64` VM against a
   dedicated project and throwaway token on the production API (NFR-005, and FR-001,
   FR-015, FR-024 and FR-026, which only a real host shows). It starts from a pre-release
   archive published by the release pipeline. Record each reported item in the spec's
@@ -128,7 +128,7 @@ runs when the owner pushes. A Windows failure then reopens the task it belongs t
 - [x] T051 [P] README: a Windows section covering install, upgrade, token rotation,
   uninstall, Event Viewer and the unsigned-binary note (NFR-006). Add CHANGELOG entries.
   (files: `README.md`, `CHANGELOG.md`) — verify: read-through by the owner.
-- [ ] T052 Sync:
+- [x] T052 Sync:
   - 006 → `implemented`, with implementation notes.
   - Amend 002: FR-004, FR-007 and US-5 get the Windows source; drop "Windows discovery"
     from out of scope.

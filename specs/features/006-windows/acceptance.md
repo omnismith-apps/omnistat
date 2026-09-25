@@ -8,23 +8,23 @@ About 60–90 minutes, including two reboots.
 
 ## 0. Before you start
 
-- [ ] **A dedicated project** on the production Omnismith, not a client's project. It
+- [x] **A dedicated project** on the production Omnismith, not a client's project. It
       should be empty; the run creates omnistat's schema and one host entity.
-- [ ] **A throwaway token** for that project, allowed to write schema and entities. Step
+- [x] **A throwaway token** for that project, allowed to write schema and entities. Step
       12 revokes it; step 13 needs a second one.
-- [ ] **The build under test.** Push a pre-release tag, e.g. `v0.1.0-rc.1`. The release
+- [x] **The build under test.** Push a pre-release tag, e.g. `v0.1.0-rc.1`. The release
       workflow publishes it with the *Unreleased* changelog as notes. On the VM, download
       `omnistat_0.1.0-rc.1_windows_amd64.zip` and `checksums.txt` from the release, and
       unzip into `C:\Users\<you>\Downloads\omnistat`.
       ```powershell
       Get-FileHash .\omnistat_0.1.0-rc.1_windows_amd64.zip -Algorithm SHA256   # must match checksums.txt
       ```
-- [ ] **A standard (non-admin) local user** for step 7, created from an elevated prompt.
+- [x] **A standard (non-admin) local user** for step 7, created from an elevated prompt.
       Delete it at the end.
       ```powershell
       net user omnistd 'Choose-A-Passw0rd!' /add
       ```
-- [ ] Two PowerShell windows: one **normal**, one **elevated** (Run as administrator).
+- [x] Two PowerShell windows: one **normal**, one **elevated** (Run as administrator).
       Both `cd` to the unzipped folder.
 
 **Typing the token.** Never write it into a command. Use
@@ -36,7 +36,7 @@ hidden prompt.
 
 ```powershell
 .\omnistat.exe version
-$env:OMNISMITH_PROJECT_ID = '<project uuid>'
+$env:OMNISMITH_PROJECT_ID = '01a0c47a-8397-7406-b6e9-ce26508cd58e'
 $env:OMNISMITH_ACCESS_TOKEN = Read-Host 'token'
 .\omnistat.exe identity
 .\omnistat.exe schema plan
@@ -132,8 +132,9 @@ Expect:
   and `SERVICE_START_NAME: NT SERVICE\omnistat`.
 - `qfailure`: `RESET_PERIOD: 86400` and three `RESTART -- Delay = 60000 milliseconds`.
 - `qfailureflag`: `FAILURE_ACTIONS_ON_NONCRASH_FAILURES: TRUE`.
-- Service key ACL: only `NT AUTHORITY\SYSTEM` and `BUILTIN\Administrators`. Nothing for
-  Users or Authenticated Users.
+- Service key ACL: `NT AUTHORITY\SYSTEM` and `BUILTIN\Administrators` with FullControl.
+  `ALL APPLICATION PACKAGES` read entries may also appear; they grant nothing without a
+  user grant (step 7 proves it). Nothing for Users or Authenticated Users.
 - `C:\ProgramData\omnistat`: SYSTEM and Administrators with FullControl, Authenticated
   Users with ReadAndExecute. Nothing that lets Users write.
 - `C:\Program Files\omnistat`: the usual Program Files entries. Users can read and
@@ -151,7 +152,7 @@ In the new window (as `omnistd`):
 reg query HKLM\SYSTEM\CurrentControlSet\Services\omnistat
 sc.exe qc omnistat
 Set-Content C:\ProgramData\omnistat\omnistat.yaml 'base_url: https://example.invalid'
-New-Item C:\ProgramData\omnistat\probe.txt
+New-Item -ItemType File C:\ProgramData\omnistat\probe.txt
 Copy-Item C:\Windows\System32\notepad.exe 'C:\Program Files\omnistat\omnistat.exe'
 ```
 Expect:
@@ -295,9 +296,13 @@ real proxy, also do a successful install with it set.
 Expect:
 - The dry run lists stop / remove service / remove event source / remove binary, then
   `would keep C:\ProgramData\omnistat`.
-- The real run shows `done:` for each step and a note that
-  `C:\Program Files\omnistat\omnistat.exe` is the running program and is removed at the
-  next restart.
+- The real run shows `done:` for each step and a note that the running program was
+  moved to `C:\Windows\Temp\omnistat-uninstalled-<pid>.exe`, which Windows deletes at the
+  next restart, and that `C:\Program Files\omnistat` is removed. The folder is gone
+  **immediately**, with no reboot needed.
+- **Reinstall before rebooting:** run `.\omnistat.exe service install` from the download
+  folder, then `Restart-Computer`. After the reboot the service must be **running**. A
+  pending deletion must not have removed the new binary.
 - It ends with "the host entity remains".
 
 ```powershell

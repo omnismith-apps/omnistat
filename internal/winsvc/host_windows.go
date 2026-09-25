@@ -184,25 +184,55 @@ func (windowsHost) CopyBinary(src, dst string) error {
 	return os.Rename(tmp, dst) // MoveFileEx with REPLACE_EXISTING
 }
 
-func (windowsHost) RemoveBinary(path string) (bool, error) {
+func (windowsHost) RemoveBinary(path string) (string, error) {
 	err := os.Remove(path)
 	switch {
 	case err == nil, errors.Is(err, os.ErrNotExist):
 		_ = os.Remove(filepath.Dir(path)) // only if empty
-		return false, nil
+		return "", nil
 	}
-	// In use (it is the running program): delete at the next restart, the
-	// file first, then its directory (FR-020).
-	for _, p := range []string{path, filepath.Dir(path)} {
+	// In use: uninstall runs from the installed copy. A running program cannot
+	// be deleted but can be moved on its volume. Move it out of the program
+	// directory, delete the moved file at the next restart, and never schedule
+	// path itself: a reinstall before that restart would otherwise lose its
+	// fresh binary at boot (FR-020).
+	moved, merr := moveAside(path)
+	if merr != nil {
+		return "", fmt.Errorf("%w (and moving the running program aside failed: %w)", err, merr)
+	}
+	pending := []string{moved}
+	if rmErr := os.Remove(filepath.Dir(path)); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+		pending = append(pending, filepath.Dir(path)) // renamed in place: the directory goes at restart too
+	}
+	for _, p := range pending {
 		p16, perr := windows.UTF16PtrFromString(p)
 		if perr != nil {
-			return false, err
+			return moved, perr
 		}
-		if merr := windows.MoveFileEx(p16, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT); merr != nil {
-			return false, fmt.Errorf("%w (and scheduling removal at restart failed: %w)", err, merr)
+		if derr := windows.MoveFileEx(p16, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT); derr != nil {
+			return moved, fmt.Errorf("scheduling removal of %s at restart: %w", p, derr)
 		}
 	}
-	return true, nil
+	return moved, nil
+}
+
+// moveAside moves the running program out of the way: to the Windows temp
+// directory (same volume as Program Files on a standard install), else to a
+// new name next to it. os.Rename never copies across volumes.
+func moveAside(path string) (string, error) {
+	name := fmt.Sprintf("omnistat-uninstalled-%d.exe", os.Getpid())
+	var candidates []string
+	if winDir, err := windows.GetSystemWindowsDirectory(); err == nil {
+		candidates = append(candidates, filepath.Join(winDir, "Temp", name))
+	}
+	candidates = append(candidates, filepath.Join(filepath.Dir(path), name))
+	var err error
+	for _, c := range candidates {
+		if err = os.Rename(path, c); err == nil {
+			return c, nil
+		}
+	}
+	return "", err
 }
 
 func (windowsHost) EnsureConfigDir(path string) (bool, error) {

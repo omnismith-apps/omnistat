@@ -298,7 +298,8 @@ Owned attributes: `cpu_usage_pct`, `load_avg_1`, `load_avg_5`, `load_avg_15`,
   for Windows so the module is complete, but omnistat cannot run there until host
   identity (002 scopes Windows out) and service shutdown (003 FR-020 is built on
   SIGTERM) are specified, and until constitution V's build matrix is amended by ADR.
-  That is its own feature.
+  That is its own feature. *(Done in 006 and ADR-0010. The Windows readings were first run
+  in 006's acceptance, 2026-09-25.)*
 - Per-core or per-CPU metrics, and the multi-entity publishing they would need.
 - Per-state breakdown metrics (user / system / iowait / steal) — an additive follow-up:
   the counters are already read, only new manifest entries would be needed.

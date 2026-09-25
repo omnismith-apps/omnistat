@@ -3,6 +3,7 @@ package winsvc
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // PlanUninstall decides everything `service uninstall` will do (FR-020),
@@ -45,8 +46,19 @@ func PlanUninstall(ctx context.Context, h Host) (*Plan, error) {
 		return "", h.EventSource(false)
 	})
 	p.add("remove "+target, func(context.Context) (string, error) {
-		deferred, err := h.RemoveBinary(target)
-		return noteIf(deferred, target+" is the running program; Windows removes it at the next restart"), err
+		leftover, err := h.RemoveBinary(target)
+		return leftoverNote(target, progDir, leftover), err
 	})
 	return p, nil
+}
+
+// leftoverNote explains a running binary that could only be moved aside (FR-020).
+func leftoverNote(target, progDir, leftover string) string {
+	switch {
+	case leftover == "":
+		return ""
+	case strings.HasPrefix(strings.ToLower(leftover), strings.ToLower(progDir)+`\`):
+		return fmt.Sprintf("%s is the running program: it was renamed to %s; Windows deletes it and %s at the next restart", target, leftover, progDir)
+	}
+	return fmt.Sprintf("%s is the running program: it was moved to %s, which Windows deletes at the next restart; %s is removed", target, leftover, progDir)
 }

@@ -208,7 +208,9 @@ recognise hosts in Omnismith (the identity is an opaque token, 002 US-4).
   daemon MUST NOT re-reconcile or re-resolve during its life.
 - **FR-020** On SIGINT/SIGTERM the daemon MUST stop scheduling, attempt one final publish
   bounded by the HTTP timeout, and exit 0. A second signal during the final publish
-  MUST exit immediately.
+  MUST exit immediately. On Windows, a stop, shutdown or preshutdown request from the
+  service manager, and Ctrl+C, Ctrl+Break or closing the console, have the same effect
+  (spec 006 FR-021–FR-024).
 - **FR-021** A dry-run flag MUST make `run` (in either mode) perform every step except
   the writes: the schema plan is shown instead of applied, entity creation is reported
   instead of performed, and each publish prints module, attribute key, target slug,
@@ -325,7 +327,7 @@ Owned attributes: `hostname` (text, host template) — module `hostname`.
 - Change detection or rate limiting of dimensions beyond FR-007.
 - Configuring daemon mode from the config file (it is a flag by design: the unit file
   or crontab decides how omnistat runs, not the shared config).
-- Windows.
+- ~~Windows~~: specified by 006.
 
 ## Decisions taken during review (2026-09-22)
 

@@ -67,12 +67,16 @@ func TestUninstall_Full(t *testing.T) {
 	}
 }
 
-// FR-020: the running binary cannot delete itself; say what remains.
+// FR-020: the running binary cannot delete itself. It is moved out of the
+// program directory, which goes at once; the report says what remains until
+// the next restart and where, never the installed path itself, so a reinstall
+// before that restart cannot lose its binary.
 func TestUninstall_BinaryInUse(t *testing.T) {
 	h := newHost()
 	h.Exe = installed
 	h.Svc = winsvc.Installed{Exists: true, Binary: installed, State: winsvc.StateStopped}
-	h.InUse = map[string]bool{installed: true}
+	leftover := `C:\Windows\Temp\omnistat-uninstalled-4242.exe`
+	h.InUse = map[string]string{installed: leftover}
 	p, err := winsvc.PlanUninstall(context.Background(), h)
 	if err != nil {
 		t.Fatal(err)
@@ -81,10 +85,33 @@ func TestUninstall_BinaryInUse(t *testing.T) {
 	if err := p.Apply(context.Background(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), installed) || !strings.Contains(out.String(), "next restart") {
-		t.Fatalf("must say what remains and when it goes:\n%s", out.String())
+	_, note, found := strings.Cut(out.String(), "done: remove "+installed)
+	if !found {
+		t.Fatalf("no remove step:\n%s", out.String())
+	}
+	if !strings.Contains(note, leftover) || !strings.Contains(note, "next restart") || !strings.Contains(note, progDir+" is removed") {
+		t.Fatalf("must say what remains, where, and that the program directory is gone:\n%s", out.String())
 	}
 	if h.Calls()[0] == "Stop" {
 		t.Fatal("a stopped service is not stopped again")
+	}
+}
+
+// When the running binary can only be renamed next to itself, the directory
+// stays until the restart too, and the report says so.
+func TestUninstall_BinaryRenamedInPlace(t *testing.T) {
+	h := newHost()
+	h.Svc = winsvc.Installed{Exists: true, Binary: installed, State: winsvc.StateStopped}
+	h.InUse = map[string]string{installed: progDir + `\omnistat-uninstalled-4242.exe`}
+	p, err := winsvc.PlanUninstall(context.Background(), h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := p.Apply(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "renamed to "+progDir+`\omnistat-uninstalled-4242.exe`) || !strings.Contains(out.String(), "deletes it and "+progDir+" at the next restart") {
+		t.Fatalf("%s", out.String())
 	}
 }
