@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/omnismith-apps/omnistat/internal/config"
+	"github.com/omnismith-apps/omnistat/internal/service"
 	"github.com/omnismith-apps/omnistat/internal/winsvc"
 	"github.com/omnismith-apps/omnistat/internal/winsvc/fakehost"
 )
@@ -42,23 +44,23 @@ type precheck struct {
 	err     error
 }
 
-func (p *precheck) fn(_ context.Context, getenv func(string) string, cfgPath string) (winsvc.Checked, error) {
+func (p *precheck) fn(_ context.Context, getenv func(string) string, cfgPath string) (service.Checked, error) {
 	p.calls++
 	p.cfgPath = cfgPath
 	p.env = map[string]string{}
-	for _, k := range winsvc.Captured {
+	for _, k := range service.Captured {
 		if v := getenv(k); v != "" {
 			p.env[k] = v
 		}
 	}
-	return winsvc.Checked{Identity: "f20a98…", Source: "windows-machine-guid"}, p.err
+	return service.Checked{Identity: "f20a98…", Source: "windows-machine-guid"}, p.err
 }
 
-func opts(pc *precheck, env map[string]string) winsvc.InstallOptions {
-	return winsvc.InstallOptions{Getenv: getenv(env), Precheck: pc.fn}
+func opts(pc *precheck, env map[string]string) service.InstallOptions {
+	return service.InstallOptions{Getenv: getenv(env), Precheck: pc.fn}
 }
 
-func descs(p *winsvc.Plan) string {
+func descs(p *service.Plan) string {
 	var b bytes.Buffer
 	p.Describe(&b)
 	return b.String()
@@ -97,6 +99,7 @@ func TestInstall_Fresh(t *testing.T) {
 	want := []string{
 		"CopyBinary " + download + " -> " + installed,
 		"EnsureConfigDir " + cfgDir,
+		"CreateFile " + cfgDir + `\omnistat.yaml`,
 		"Register " + installed,
 		"StoreEnv 2",
 		"EventSource true",
@@ -131,13 +134,13 @@ func TestInstall_TokenPrompt(t *testing.T) {
 	}
 
 	for name, h := range map[string]*fakehost.Host{
-		"no console":   func() *fakehost.Host { h := newHost(); h.SecretErr = winsvc.ErrNotInteractive; return h }(),
+		"no console":   func() *fakehost.Host { h := newHost(); h.SecretErr = service.ErrNotInteractive; return h }(),
 		"empty answer": func() *fakehost.Host { h := newHost(); h.Secret = "   "; return h }(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			pc := &precheck{}
 			_, err := winsvc.PlanInstall(context.Background(), h, opts(pc, nil))
-			if !errors.Is(err, winsvc.ErrNoToken) || pc.calls != 0 || len(h.Calls()) != 0 {
+			if !errors.Is(err, service.ErrNoToken) || pc.calls != 0 || len(h.Calls()) != 0 {
 				t.Fatalf("err %v, prechecks %d, calls %v", err, pc.calls, h.Calls())
 			}
 		})
@@ -306,4 +309,61 @@ func keys(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// 007 FR-017 (amends 006): a project id set nowhere is asked for and stored;
+// one in the environment needs no prompt.
+func TestInstall_ProjectPrompt(t *testing.T) {
+	h := newHost()
+	h.CfgDir = t.TempDir() // no config file
+	h.Line = "p-typed"
+	pc := &precheck{}
+	p, err := winsvc.PlanInstall(context.Background(), h, opts(pc, map[string]string{"OMNISMITH_ACCESS_TOKEN": secret}))
+	if err != nil || h.LinePrompts() != 1 || pc.env["OMNISMITH_PROJECT_ID"] != "p-typed" {
+		t.Fatalf("%v prompts=%d %v", err, h.LinePrompts(), pc.env)
+	}
+	if err := p.Apply(context.Background(), &bytes.Buffer{}); err != nil || h.Svc.Env["OMNISMITH_PROJECT_ID"] != "p-typed" {
+		t.Fatalf("stored: %v", err)
+	}
+
+	h = newHost()
+	if _, err := winsvc.PlanInstall(context.Background(), h, opts(&precheck{}, map[string]string{"OMNISMITH_ACCESS_TOKEN": secret, "OMNISMITH_PROJECT_ID": "p1"})); err != nil || h.LinePrompts() != 0 {
+		t.Fatalf("%v prompts=%d", err, h.LinePrompts())
+	}
+}
+
+// 007 FR-014 (amends 006 FR-012): install writes the commented starter when no
+// config file exists, says so in the dry-run, and never touches an existing one.
+func TestInstall_StarterConfig(t *testing.T) {
+	h := newHost()
+	p, err := winsvc.PlanInstall(context.Background(), h, opts(&precheck{}, map[string]string{"OMNISMITH_ACCESS_TOKEN": secret}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := descs(p); !strings.Contains(d, "would create "+cfgDir+`\omnistat.yaml: a commented starter`) {
+		t.Fatalf("dry-run:\n%s", d)
+	}
+	if err := p.Apply(context.Background(), &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.Created[cfgDir+`\omnistat.yaml`]; !bytes.Equal(got, config.Starter) {
+		t.Fatalf("starter written: %d bytes", len(got))
+	}
+
+	// A config file that exists is left alone: no step at all.
+	h = newHost()
+	h.Existing = map[string]bool{cfgDir + `\omnistat.yaml`: true}
+	h.Svc = winsvc.Installed{Exists: true, Binary: installed, Env: map[string]string{"OMNISMITH_ACCESS_TOKEN": secret, "OMNISMITH_PROJECT_ID": "p1"}}
+	p, err = winsvc.PlanInstall(context.Background(), h, opts(&precheck{}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Apply(context.Background(), &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range h.Calls() {
+		if strings.HasPrefix(c, "CreateFile") {
+			t.Fatalf("an existing config must not be touched: %v", h.Calls())
+		}
+	}
 }

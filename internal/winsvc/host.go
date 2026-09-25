@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/omnismith-apps/omnistat/internal/config"
+	"github.com/omnismith-apps/omnistat/internal/service"
 )
 
 // Service registration (spec 006 FR-008–FR-010).
@@ -22,21 +22,11 @@ const (
 // Args is the service's command line after the binary: the daemon (003 FR-019).
 var Args = []string{"run", "--daemon"}
 
-// Captured lists the environment variables install stores for the service,
-// which receives them as its environment (FR-013). Every one is treated as a
-// secret: printed by name only (FR-016), protected like the token (FR-015).
-var Captured = []string{
-	config.EnvToken, config.EnvProjectID, config.EnvBaseURL, config.EnvIdentity,
-	"HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
-}
-
 // Errors the commands report.
 var (
 	ErrUnsupported    = errors.New("not supported on this platform")
 	ErrNotElevated    = errors.New("needs Administrator rights: run it from an elevated prompt (Run as administrator)")
 	ErrForeignService = errors.New("a service named omnistat exists that omnistat did not install")
-	ErrNotInteractive = errors.New("no console to prompt on")
-	ErrNoToken        = errors.New("no access token: set " + config.EnvToken + " or run install from an interactive prompt")
 	ErrStartFailed    = errors.New("the service stopped right after starting; see Event Viewer → Windows Logs → Application, source omnistat")
 )
 
@@ -108,6 +98,11 @@ type Host interface {
 	// EnsureConfigDir creates path if needed and restricts writing to
 	// Administrators and SYSTEM; tightened reports that permissions changed (FR-012).
 	EnsureConfigDir(path string) (tightened bool, err error)
+	// FileExists reports whether path exists.
+	FileExists(path string) bool
+	// CreateFile writes data to path unless path exists; created reports
+	// whether it did. The file inherits its directory's permissions (007 FR-014).
+	CreateFile(path string, data []byte) (created bool, err error)
 	// Register creates or updates the service with r (FR-008–FR-010).
 	Register(ctx context.Context, r Registration) error
 	// StoreEnv replaces the service's stored settings and restricts reading them
@@ -123,7 +118,7 @@ type Host interface {
 	State(ctx context.Context) (State, error)
 	// Delete removes the service registration and its stored settings (FR-020).
 	Delete(ctx context.Context) error
-	// PromptSecret reads a line from the console without echo (FR-014);
-	// ErrNotInteractive without a console.
-	PromptSecret(prompt string) (string, error)
+	// Prompter reads the token without echo (FR-014) and a missing project id
+	// (007 FR-017); service.ErrNotInteractive without a console.
+	service.Prompter
 }

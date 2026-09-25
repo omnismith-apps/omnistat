@@ -210,7 +210,9 @@ recognise hosts in Omnismith (the identity is an opaque token, 002 US-4).
   bounded by the HTTP timeout, and exit 0. A second signal during the final publish
   MUST exit immediately. On Windows, a stop, shutdown or preshutdown request from the
   service manager, and Ctrl+C, Ctrl+Break or closing the console, have the same effect
-  (spec 006 FR-021–FR-024).
+  (spec 006 FR-021–FR-024). Under systemd, the daemon also reports readiness once
+  reconciliation and resolution are done, and on a stop it extends systemd's stop
+  timeout to cover the final publish (spec 007 FR-010, FR-023).
 - **FR-021** A dry-run flag MUST make `run` (in either mode) perform every step except
   the writes: the schema plan is shown instead of applied, entity creation is reported
   instead of performed, and each publish prints module, attribute key, target slug,
@@ -258,6 +260,10 @@ recognise hosts in Omnismith (the identity is an opaque token, 002 US-4).
   spec 006 acceptance.)*
 - **FR-027** Startup MUST log the effective schedule: each enabled module with its
   collection interval, and the publish interval.
+
+Where the logs go depends on how omnistat runs: stderr on a console, the Windows
+Application log as a Windows service (spec 006 FR-025), and the journal, each record at
+its priority, under systemd (spec 007 FR-022).
 
 ## Non-functional requirements
 - **NFR-001** (reliability) No collection or publish runs without a deadline; the daemon

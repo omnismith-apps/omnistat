@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -21,6 +22,8 @@ import (
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
 	"golang.org/x/sys/windows/svc/mgr"
+
+	"github.com/omnismith-apps/omnistat/internal/service"
 )
 
 // Security descriptors (SDDL). Owner BA so a previous non-admin owner of the
@@ -254,6 +257,28 @@ func (windowsHost) EnsureConfigDir(path string) (bool, error) {
 	return existed && before != sddlOf(path, windows.SE_FILE_OBJECT), nil
 }
 
+func (windowsHost) FileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// CreateFile creates path with data unless it exists (007 FR-014). A new file
+// inherits the configuration directory's protected DACL (FR-012).
+func (windowsHost) CreateFile(path string, data []byte) (bool, error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // mode bits are ignored on Windows; the inherited DACL decides
+	if errors.Is(err, fs.ErrExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return true, err
+	}
+	return true, f.Close()
+}
+
 func sddlOf(object string, typ windows.SE_OBJECT_TYPE) string {
 	sd, err := windows.GetNamedSecurityInfo(object, typ, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
@@ -440,19 +465,37 @@ func explainSCM(err error) error {
 	return err
 }
 
+// console reads the operator's answers; one reader for every prompt, so none
+// loses input another buffered.
+var console = bufio.NewReader(os.Stdin)
+
 func (windowsHost) PromptSecret(prompt string) (string, error) {
 	in := windows.Handle(os.Stdin.Fd())
 	var mode uint32
 	if err := windows.GetConsoleMode(in, &mode); err != nil {
-		return "", ErrNotInteractive
+		return "", service.ErrNotInteractive
 	}
 	fmt.Fprint(os.Stderr, prompt)
 	if err := windows.SetConsoleMode(in, mode&^windows.ENABLE_ECHO_INPUT); err != nil {
 		return "", err
 	}
 	defer windows.SetConsoleMode(in, mode) //nolint:errcheck // best effort restore
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	line, err := console.ReadString('\n')
 	fmt.Fprintln(os.Stderr)
+	if err != nil && line == "" {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}
+
+// PromptLine reads a line with echo (007 FR-017).
+func (windowsHost) PromptLine(prompt string) (string, error) {
+	var mode uint32
+	if err := windows.GetConsoleMode(windows.Handle(os.Stdin.Fd()), &mode); err != nil {
+		return "", service.ErrNotInteractive
+	}
+	fmt.Fprint(os.Stderr, prompt)
+	line, err := console.ReadString('\n')
 	if err != nil && line == "" {
 		return "", err
 	}

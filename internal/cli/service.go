@@ -5,15 +5,17 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/omnismith-apps/omnistat/internal/config"
+	"github.com/omnismith-apps/omnistat/internal/service"
+	"github.com/omnismith-apps/omnistat/internal/systemd"
 	"github.com/omnismith-apps/omnistat/internal/winsvc"
 )
 
-// serviceSettle is how long install watches the service after starting it (spec 006 FR-011).
+// serviceSettle is how long install watches the service after starting it
+// (spec 006 FR-011, 007 FR-011).
 const serviceSettle = 5 * time.Second
 
 func (a *App) serviceSettle() time.Duration {
@@ -23,20 +25,72 @@ func (a *App) serviceSettle() time.Duration {
 	return serviceSettle
 }
 
-// service implements `omnistat service install|uninstall` (spec 006).
-func (a *App) service(e env, args []string) int {
-	host := a.ServiceHost
-	if host == nil {
+// installer is one platform's `service install|uninstall`: the Windows
+// service manager (spec 006) or systemd (spec 007).
+type installer interface {
+	PlanInstall(ctx context.Context, o service.InstallOptions) (*service.Plan, error)
+	PlanUninstall(ctx context.Context) (*service.Plan, error)
+}
+
+type windowsInstaller struct{ h winsvc.Host }
+
+func (w windowsInstaller) PlanInstall(ctx context.Context, o service.InstallOptions) (*service.Plan, error) {
+	return winsvc.PlanInstall(ctx, w.h, o)
+}
+
+func (w windowsInstaller) PlanUninstall(ctx context.Context) (*service.Plan, error) {
+	return winsvc.PlanUninstall(ctx, w.h)
+}
+
+type systemdInstaller struct{ h systemd.Host }
+
+func (s systemdInstaller) PlanInstall(ctx context.Context, o service.InstallOptions) (*service.Plan, error) {
+	return systemd.PlanInstall(ctx, s.h, o)
+}
+
+func (s systemdInstaller) PlanUninstall(ctx context.Context) (*service.Plan, error) {
+	return systemd.PlanUninstall(ctx, s.h)
+}
+
+// errServiceUnsupported: no service backend on this platform (006 FR-027,
+// 007 FR-003).
+var errServiceUnsupported = errors.New("not supported on this platform")
+
+// installer picks the backend: an injected host (tests), else the platform's.
+func (a *App) installer() (installer, error) {
+	switch {
+	case a.ServiceHost != nil:
+		return windowsInstaller{a.ServiceHost}, nil
+	case a.SystemdHost != nil:
+		return systemdInstaller{a.SystemdHost}, nil
+	}
+	switch a.goos() {
+	case "windows":
 		h, err := winsvc.NewHost()
 		if errors.Is(err, winsvc.ErrUnsupported) {
-			// FR-027
-			fmt.Fprintf(e.stderr, "omnistat: service: not supported on %s — the service commands are Windows-only; elsewhere run `omnistat run --daemon` under systemd or launchd\n", a.goos())
-			return ExitError
+			return nil, errServiceUnsupported
 		}
-		if err != nil {
-			return fail(e, err)
+		return windowsInstaller{h}, err
+	case "linux":
+		h, err := systemd.NewHost()
+		if errors.Is(err, systemd.ErrUnsupported) {
+			return nil, errServiceUnsupported
 		}
-		host = h
+		return systemdInstaller{h}, err
+	}
+	return nil, errServiceUnsupported
+}
+
+// service implements `omnistat service install|uninstall` (specs 006, 007).
+func (a *App) service(e env, args []string) int {
+	inst, err := a.installer()
+	if errors.Is(err, errServiceUnsupported) {
+		// 006 FR-027, 007 FR-003
+		fmt.Fprintf(e.stderr, "omnistat: service: not supported on %s — the service commands support Windows, and Linux with systemd; elsewhere run `omnistat run --daemon` under your init system or supervisor\n", a.goos())
+		return ExitError
+	}
+	if err != nil {
+		return fail(e, err)
 	}
 	sub := ""
 	if len(args) > 0 {
@@ -44,16 +98,16 @@ func (a *App) service(e env, args []string) int {
 	}
 	switch sub {
 	case "install":
-		return a.serviceInstall(e, host, args[1:])
+		return a.serviceInstall(e, inst, args[1:])
 	case "uninstall":
-		return a.serviceUninstall(e, host, args[1:])
+		return a.serviceUninstall(e, inst, args[1:])
 	default:
 		fmt.Fprintln(e.stderr, "usage: omnistat service install [--dry-run] [--replace-token] | uninstall [--dry-run]")
 		return ExitError
 	}
 }
 
-func (a *App) serviceInstall(e env, host winsvc.Host, args []string) int {
+func (a *App) serviceInstall(e env, inst installer, args []string) int {
 	fs := flag.NewFlagSet("service install", flag.ContinueOnError)
 	fs.SetOutput(e.stderr)
 	dryRun := fs.Bool("dry-run", false, "run the checks and print what would change; change nothing")
@@ -61,7 +115,7 @@ func (a *App) serviceInstall(e env, host winsvc.Host, args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
-	p, err := winsvc.PlanInstall(e.ctx, host, winsvc.InstallOptions{
+	p, err := inst.PlanInstall(e.ctx, service.InstallOptions{
 		Getenv:       e.getenv,
 		ReplaceToken: *replaceToken,
 		Precheck:     a.servicePrecheck(e),
@@ -87,12 +141,13 @@ func (a *App) serviceInstall(e env, host winsvc.Host, args []string) int {
 	if err := p.Apply(e.ctx, e.stdout); err != nil {
 		return fail(e, err)
 	}
-	fmt.Fprintf(e.stdout, "omnistat is installed and running as service %q.\nLogs: Event Viewer → Windows Logs → Application, source %q.\n", winsvc.Name, winsvc.EventSource)
+	fmt.Fprintf(e.stdout, "omnistat is installed and running as service %q.\nLogs: %s\n", "omnistat", p.LogHint)
 	return ExitOK
 }
 
-// printInstallSummary is the US-1/1 report. Settings are named, never shown (FR-016).
-func (a *App) printInstallSummary(e env, p *winsvc.Plan) {
+// printInstallSummary is the US-1/1 report. Settings are named, never shown
+// (006 FR-016, 007 FR-016).
+func (a *App) printInstallSummary(e env, p *service.Plan) {
 	c := p.Checked
 	fmt.Fprintf(e.stdout, "  identity: %s (%s)\n", c.Identity, c.Source)
 	switch {
@@ -103,53 +158,56 @@ func (a *App) printInstallSummary(e env, p *winsvc.Plan) {
 	default:
 		fmt.Fprintf(e.stdout, "  entity:   %s\n", c.EntityID)
 	}
+	if p.Unit != "" {
+		fmt.Fprintf(e.stdout, "  unit:     %s\n", p.Unit)
+	}
 	fmt.Fprintf(e.stdout, "  binary:   %s\n", p.Binary)
-	cfgNote := "not present — defaults apply"
-	if _, err := os.Stat(p.ConfigPath); err == nil {
-		cfgNote = "present"
+	cfgNote := "not present — install creates a commented starter; defaults apply"
+	if p.ConfigPresent {
+		cfgNote = "present, kept as it is"
 	}
 	fmt.Fprintf(e.stdout, "  config:   %s (%s)\n", p.ConfigPath, cfgNote)
 	fmt.Fprintf(e.stdout, "  settings: %s (stored for the service, values not shown)\n", strings.Join(p.Stored, ", "))
 }
 
 // servicePrecheck runs the read-only checks of `omnistat identity` with the
-// settings and config file the service will get (spec 006 FR-006). Unlike
-// `identity`, it requires the project: the service cannot run without it. A
-// project whose schema is not applied yet passes; the service applies it.
-func (a *App) servicePrecheck(e env) func(context.Context, func(string) string, string) (winsvc.Checked, error) {
-	return func(ctx context.Context, getenv func(string) string, cfgPath string) (winsvc.Checked, error) {
+// settings and config file the service will get (006 FR-006, 007 FR-005).
+// Unlike `identity`, it requires the project: the service cannot run without
+// it. A project whose schema is not applied yet passes; the service applies it.
+func (a *App) servicePrecheck(e env) service.Precheck {
+	return func(ctx context.Context, getenv func(string) string, cfgPath string) (service.Checked, error) {
 		s, err := config.LoadWithDefault("", cfgPath, getenv)
 		if err != nil {
-			return winsvc.Checked{}, err
+			return service.Checked{}, err
 		}
 		if err := s.RequireAPI(); err != nil {
-			return winsvc.Checked{}, err
+			return service.Checked{}, err
 		}
 		ce := e
 		ce.ctx, ce.getenv = ctx, getenv
 		rep, err := a.identityCheck(ce, s)
 		if err != nil {
-			return winsvc.Checked{}, err
+			return service.Checked{}, err
 		}
-		c := winsvc.Checked{Identity: rep.Identity, Source: rep.Source, EntityID: rep.EntityID, WouldCreate: rep.WouldCreate}
+		c := service.Checked{Identity: rep.Identity, Source: rep.Source, EntityID: rep.EntityID, WouldCreate: rep.WouldCreate}
 		switch {
 		case errors.Is(rep.err, errSchemaNotReady):
 			c.SchemaPending = true
 		case rep.err != nil:
-			return winsvc.Checked{}, rep.err
+			return service.Checked{}, rep.err
 		}
 		return c, nil
 	}
 }
 
-func (a *App) serviceUninstall(e env, host winsvc.Host, args []string) int {
+func (a *App) serviceUninstall(e env, inst installer, args []string) int {
 	fs := flag.NewFlagSet("service uninstall", flag.ContinueOnError)
 	fs.SetOutput(e.stderr)
 	dryRun := fs.Bool("dry-run", false, "print what would be removed; change nothing")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
-	p, err := winsvc.PlanUninstall(e.ctx, host)
+	p, err := inst.PlanUninstall(e.ctx)
 	if err != nil {
 		return fail(e, err)
 	}

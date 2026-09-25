@@ -1,0 +1,70 @@
+# omnistat configuration — https://github.com/omnismith-apps/omnistat
+#
+# Written by `omnistat service install` because no configuration file was
+# here. Install never changes this file again, and uninstall keeps it.
+# Every setting below is commented out, so the defaults shown are in force.
+# Uncomment a setting to change it, then restart the service:
+#   Linux:   sudo systemctl restart omnistat
+#   Windows: Restart-Service omnistat
+# Check an edit before the restart, with the same settings the service uses:
+#   omnistat --config <this file> schema plan
+#
+# The access token never goes in this file (an access_token key is rejected).
+# It lives in OMNISMITH_ACCESS_TOKEN, which install stores for the service;
+# run `omnistat service install --replace-token` to change it.
+# Settings in the service's environment (OMNISMITH_PROJECT_ID,
+# OMNISMITH_BASE_URL, OMNISTAT_IDENTITY) win over this file.
+
+# The Omnismith project to publish to. Install stores the id you gave it.
+# project_id: 00000000-0000-0000-0000-000000000000
+
+# The Omnismith API.
+# base_url: https://api.omnismith.io/v1
+
+# Schema reconciliation: apply creates what is missing (additive only), verify
+# only checks it (for a token that cannot write the schema), off skips it.
+# The host template can be remapped to an existing template's slug.
+# schema:
+#   mode: apply
+#   host_template: host
+
+# How often the collected values are published (1s–1h).
+# publish:
+#   interval: 60s
+
+# Per-module settings. Each module has its own collection interval (1s–24h);
+# a module can be switched off (neither its schema nor its values), moved to
+# another template, or have an attribute mapped onto an existing one.
+# Attribute keys are listed in the README.
+# modules:
+#   hostname:
+#     interval: 5m
+#   cpu:
+#     interval: 10s
+#     template: host
+#     attributes:
+#       usage:
+#         slug: cpu_usage_pct
+#         template: host
+#         name: CPU usage
+#         description: Share of CPU time spent busy, in percent
+#   memory:
+#     interval: 30s
+#     enabled: true
+
+# Pin the host identity instead of discovering it from the OS (for cloned
+# machines, or to keep an entity across a reinstall of the OS).
+# identity:
+#   static: rack7-node3
+
+# The API client: each request's timeout, and retries of a failed request.
+# http:
+#   timeout: 15s
+#   retries: 3
+
+# Logging: level debug | info | warn | error; format text | json. The daemon
+# logs a "publish summary" every summary_interval (1m–24h; 0 logs every publish).
+# log:
+#   level: info
+#   format: text
+#   summary_interval: 15m

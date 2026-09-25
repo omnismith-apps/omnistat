@@ -4,7 +4,7 @@ VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 GORELEASER := go run github.com/goreleaser/goreleaser/v2@v2.17.1
 
-.PHONY: all build crosscheck vet-windows release-check release-snapshot run test test-race lint vet fmt tidy sandbox specs-check clean help
+.PHONY: all build crosscheck vet-windows release-check release-snapshot run test test-race lint vet fmt tidy sandbox e2e-systemd specs-check clean help
 
 # Every target constitution V requires a static binary for, plus the Windows pairs
 # that 004 NFR-005 keeps compiling so the cross-platform readings cannot rot.
@@ -12,9 +12,9 @@ CROSS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows
 
 all: fmt vet lint test build ## Full local gate (same as CI)
 
-build: ## Build ./bin/omnistat
+build: ## Build ./bin/omnistat (static, CGO-free, as released)
 	@mkdir -p bin
-	go build -trimpath -ldflags '$(LDFLAGS)' -o bin/$(BINARY) ./cmd/$(BINARY)
+	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/$(BINARY) ./cmd/$(BINARY)
 
 crosscheck: vet-windows ## Verify the binary builds CGO-free for every target (004 NFR-005)
 	@set -e; for pair in $(CROSS); do \
@@ -58,6 +58,9 @@ tidy: ## go mod tidy and verify
 
 sandbox: ## Run build-tagged tests against a real project (sources ./.env; creates entities, never deletes)
 	@set -a; [ -f .env ] && . ./.env; set +a; go test -tags sandbox -run 'TestSandbox' -v ./... 2>&1 | grep -vE '^(=== RUN|\?|ok )'
+
+e2e-systemd: build ## Container acceptance of `service` on systemd (Docker, ./.env, local API; DISTROS="fedora44 …")
+	./scripts/e2e-systemd.sh $(DISTROS)
 
 specs-check: ## Validate spec folder structure and frontmatter
 	./scripts/check-specs.sh

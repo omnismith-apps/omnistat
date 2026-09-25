@@ -14,6 +14,7 @@ import (
 	"github.com/omnismith-apps/omnistat/internal/module/machineid"
 	"github.com/omnismith-apps/omnistat/internal/publish"
 	"github.com/omnismith-apps/omnistat/internal/schema"
+	"github.com/omnismith-apps/omnistat/internal/systemd"
 )
 
 // run implements `omnistat run` (spec 003 FR-018…022): reconcile → resolve
@@ -83,8 +84,15 @@ func (a *App) run(e env, args []string) int {
 	}
 	buf := collect.NewBuffer(a.MaxPerMetric)
 	l := &loop{env: e, clock: clock, buf: buf, pub: pub, sources: sources, interval: p.settings.PublishInterval, timeout: p.settings.HTTP.Timeout,
-		daemonMode: *daemon, summaryEvery: p.settings.Log.SummaryInterval}
+		daemonMode: *daemon, notify: *daemon && !*dryRun, summaryEvery: p.settings.Log.SummaryInterval}
 	if *daemon {
+		if l.notify {
+			// Started, reconciled and resolved: systemd may count the start
+			// as successful (spec 007 FR-010). Outside systemd a no-op.
+			if err := systemd.Notify(e.getenv, "READY=1"); err != nil {
+				e.log.Debug("readiness not sent", "error", err)
+			}
+		}
 		return l.daemon()
 	}
 	return l.once(*dryRun)
@@ -145,6 +153,10 @@ func (a *App) resolveHost(e env, p prepared, resolved schema.Resolved, dryRun bo
 	return h, nil
 }
 
+// stopMargin is what the daemon asks systemd for on top of the HTTP timeout
+// to stop the scheduler, publish and exit (spec 007 FR-023).
+const stopMargin = 5 * time.Second
+
 // loop is the collect/publish machinery shared by one-shot and daemon.
 type loop struct {
 	env      env
@@ -154,6 +166,10 @@ type loop struct {
 	sources  []collect.Source
 	interval time.Duration
 	timeout  time.Duration
+
+	// notify: tell systemd about readiness and stop (spec 007 FR-010, FR-023);
+	// a dry-run never does.
+	notify bool
 
 	// Publish logging in daemon mode (FR-026a).
 	daemonMode   bool
@@ -256,6 +272,12 @@ func (l *loop) daemon() int {
 	}
 
 	// Stop signal: no more collections, one final publish under the HTTP deadline (FR-020, NFR-005).
+	// Under systemd, the stop timeout is extended to cover it (spec 007 FR-023).
+	if l.notify {
+		if err := systemd.Notify(l.env.getenv, fmt.Sprintf("STOPPING=1\nEXTEND_TIMEOUT_USEC=%d", (l.timeout+stopMargin).Microseconds())); err != nil {
+			l.env.log.Debug("stop notification not sent", "error", err)
+		}
+	}
 	stop()
 	fctx, fcancel := context.WithTimeout(context.Background(), l.timeout)
 	defer fcancel()

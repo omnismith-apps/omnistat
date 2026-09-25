@@ -3,7 +3,6 @@ package cli_test
 import (
 	"bytes"
 	"context"
-	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -64,7 +63,7 @@ func TestServiceInstall(t *testing.T) {
 		"identity: " + machineid.Derive(rawID) + " (linux-machine-id)",
 		"no omnistat schema yet",
 		`binary:   C:\Program Files\omnistat\omnistat.exe`,
-		"not present — defaults apply",
+		"not present — install creates a commented starter",
 		"settings: HTTPS_PROXY, OMNISMITH_ACCESS_TOKEN, OMNISMITH_BASE_URL, OMNISMITH_PROJECT_ID",
 		"done: start the service",
 		"installed and running",
@@ -168,15 +167,13 @@ func TestServiceUninstall(t *testing.T) {
 	assertNoSecrets(t, r)
 }
 
-// FR-027: off Windows the command says it is unsupported.
+// 006 FR-027, 007 FR-003: where there is no service backend (macOS), the
+// command says it is unsupported and exits 1.
 func TestService_UnsupportedPlatform(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("on Windows the real service manager would be used")
-	}
-	app := &cli.App{Registry: registryWithMachineID(fstest.MapFS{}), Version: "t"}
+	app := &cli.App{Registry: registryWithMachineID(fstest.MapFS{}), Version: "t", GOOS: "darwin"}
 	var out, errb bytes.Buffer
 	code := app.Run(context.Background(), []string{"service", "install"}, &out, &errb, func(string) string { return "" })
-	if code != 1 || !strings.Contains(errb.String(), "not supported on "+runtime.GOOS) {
+	if code != 1 || !strings.Contains(errb.String(), "not supported on darwin") || !strings.Contains(errb.String(), "Linux with systemd") {
 		t.Fatalf("code=%d stderr=%s", code, errb.String())
 	}
 }

@@ -5,6 +5,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-25
+
+omnistat installs itself as a systemd service on Linux.
+
+### Added
+- `omnistat service install|uninstall` on Linux with systemd 239 or later (feature 007, ADR-0012). `sudo omnistat service install`:
+  - copies the binary to `/usr/local/bin/omnistat`;
+  - creates `/etc/omnistat` with a commented starter `omnistat.yaml`;
+  - stores the token and settings in `/etc/omnistat/omnistat.env`, readable by root only (lower-case proxy variables included);
+  - writes, enables and starts `/etc/systemd/system/omnistat.service`.
+
+  The service runs as a systemd dynamic user with no capabilities and a read-only, sandboxed view of the system (`systemd-analyze security`: 1.1 "OK"). It starts once the network is online and restarts one minute after any failure. Install checks the token, project and identity first; running it again upgrades the binary and unit and keeps settings, config and drop-ins. `--replace-token` and `--dry-run` (which shows the full unit) work as on Windows; uninstall keeps `/etc/omnistat` and your drop-ins.
+- Under systemd, `run --daemon` reports readiness (`Type=notify`), so a start with a bad token fails visibly. On stop it extends systemd's stop timeout to cover its final publish. Log records reach the journal at their priority (`journalctl -u omnistat -p warning` shows only problems).
+- On Linux and Windows, `service install` writes a commented starter config file when none exists, and asks for a project id that is set nowhere (spec 006 amended).
+- `make e2e-systemd`: container acceptance of the systemd service on Fedora, Debian, Ubuntu and Rocky Linux, against a real API.
+- Spec 007 (omnistat as a systemd service); ADR-0012 (the Linux service's security model).
+
+### Changed
+- `omnistat service` on macOS now says the service commands support Windows and Linux with systemd. The help text no longer marks them Windows-only.
+- `make build` builds CGO-free, as the release does. It used to link the host's glibc dynamically, so a local build failed on older distributions such as RHEL 8.
+
 ## [0.1.0] - 2026-09-25
 
 First release: Linux, macOS and Windows (amd64, arm64).

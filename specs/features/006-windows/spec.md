@@ -148,8 +148,9 @@ from a Linux shell, so that I can try things before installing the service.
    `identity` or `run`, **Then** each behaves as specified in 001–005.
 2. **Given** `run --daemon` in a console, **When** I press Ctrl+C or Ctrl+Break, or
    close the window, **Then** it behaves as 003 FR-020 specifies for SIGINT/SIGTERM.
-3. **Given** Linux or macOS, **When** I run `omnistat service install`, **Then** it says
-   the command is not supported on this platform and exits 1.
+3. **Given** macOS, **When** I run `omnistat service install`, **Then** it says the
+   command is not supported on this platform and exits 1. *(Amended by 007: Linux with
+   systemd has the command.)*
 
 ## Functional requirements
 
@@ -196,8 +197,11 @@ from a Linux shell, so that I can try things before installing the service.
   under the machine-wide application data folder (`%ProgramData%`). It is used when
   present, and defaults apply otherwise. Install MUST create that directory if it is
   missing, and MUST ensure that only Administrators and SYSTEM can write to it and that
-  the service identity can read it. Install creates no config file. The config file can
-  set `base_url`, so anyone able to write it could send the token to another server.
+  the service identity can read it. When no config file exists, install writes a
+  commented starter there, which inherits the directory's permissions and leaves every
+  default in force; an existing file is never changed. *(Amended by 007 FR-014: install
+  created no config file before.)* The config file can set `base_url`, so anyone able to
+  write it could send the token to another server.
 - **FR-013** Install MUST take these settings from its own environment and store them for
   the service, which receives them as its environment. Precedence of flags, then
   environment, then config file is unchanged:
@@ -208,7 +212,9 @@ from a Linux shell, so that I can try things before installing the service.
   neither in the environment nor already stored, install MUST ask for it without echo
   when run interactively. It MUST fail when not run interactively. A token typed into a
   PowerShell `$env:` assignment is saved in PowerShell's persistent command history, and
-  the prompt is the way around that.
+  the prompt is the way around that. A project id set neither in the environment, nor
+  stored, nor in the config file is asked for too, with echo; without a console the
+  pre-check reports it. *(Amended by 007 FR-017.)*
 - **FR-015** The stored settings MUST be readable only by Administrators, SYSTEM and what
   the service manager needs to start the service. A standard local user MUST NOT be able
   to read them. Windows' default permissions on service configuration let every local
@@ -268,8 +274,9 @@ from a Linux shell, so that I can try things before installing the service.
   it. Console runs keep logging to stderr (003).
 
 ### Elsewhere and dry-run
-- **FR-027** On Linux and macOS, `omnistat service …` MUST fail with a message that the
-  command is not supported on this platform, and exit 1 (US-7/3).
+- **FR-027** On macOS, `omnistat service …` MUST fail with a message that the command is
+  not supported on this platform, and exit 1 (US-7/3). *(Amended by 007: Linux with
+  systemd is served by spec 007.)*
 - **FR-028** `service install --dry-run` and `service uninstall --dry-run` MUST run the
   same checks and print every change they would make: paths, service settings, recovery
   policy, the names of stored settings, and permission changes. They change nothing
@@ -364,8 +371,7 @@ Uninstall removes all of these except the config directory.
 ## Out of scope
 
 - Code signing, and MSI, winget or Chocolatey packages.
-- Service installation on Linux (systemd) and macOS (launchd). That is a later feature,
-  and `service` is Windows-only until then (FR-027).
+- Service installation on macOS (launchd). Linux (systemd) is spec 007.
 - `start`, `stop` and `status` subcommands. Services, `Start-Service`/`Stop-Service` and
   `sc` already do this.
 - Several instances on one host, or custom service names.
@@ -463,8 +469,9 @@ Found in acceptance and fixed after it:
   deletion at restart **at its installed path**. A reinstall before that restart would
   have lost its fresh binary at boot. Now the running binary is moved to
   `%SystemRoot%\Temp` (or, failing that, renamed next to itself). The program directory
-  is removed at once, and only the moved file is deleted at restart. The owner has not
-  run this fix on Windows yet: **to verify in the next rc** (runbook step 16).
+  is removed at once, and only the moved file is deleted at restart. The owner verified
+  this fix on Windows on 2026-09-25, in the run that also accepted spec 007's amendments
+  (runbook steps 16 and 17).
 - **Service key ACL shows `ALL APPLICATION PACKAGES` (read)** next to SYSTEM and
   Administrators, although install writes a protected SYSTEM/Administrators-only DACL.
   It is not a gap. An AppContainer process needs its user **and** its package granted,

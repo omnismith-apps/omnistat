@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -18,6 +19,7 @@ import (
 	"github.com/omnismith-apps/omnistat/internal/module/hostname"
 	"github.com/omnismith-apps/omnistat/internal/module/machineid"
 	"github.com/omnismith-apps/omnistat/internal/module/memory"
+	"github.com/omnismith-apps/omnistat/internal/systemd"
 	"github.com/omnismith-apps/omnistat/internal/winsvc"
 )
 
@@ -42,7 +44,14 @@ func main() {
 		stop()
 	}()
 	app := &cli.App{Registry: registry(), Version: resolveVersion()}
-	code := app.Run(ctx, os.Args[1:], os.Stdout, os.Stderr, os.Getenv)
+	// Under systemd, stderr is the journal: records and errors carry their
+	// priority (spec 007 FR-022).
+	var stderr io.Writer = os.Stderr
+	if systemd.JournalStream(os.Stderr, os.Getenv) {
+		app.Journal = os.Stderr
+		stderr = systemd.PriorityWriter(os.Stderr, systemd.PrioErr)
+	}
+	code := app.Run(ctx, os.Args[1:], os.Stdout, stderr, os.Getenv)
 	stop()
 	os.Exit(code)
 }

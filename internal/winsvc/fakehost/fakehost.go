@@ -25,20 +25,28 @@ type Host struct {
 	// StateAfterStart is what the service settles into after Start
 	// (zero value: stopped, so tests of success set it to StateRunning).
 	StateAfterStart winsvc.State
-	// Secret answers PromptSecret; SecretErr fails it (e.g. ErrNotInteractive).
+	// Secret answers PromptSecret; SecretErr fails it (e.g. service.ErrNotInteractive).
 	Secret    string
 	SecretErr error
+	// Line answers PromptLine (the project id); LineErr fails it.
+	Line    string
+	LineErr error
 	// InUse maps a binary that cannot be deleted now (the running program) to
 	// where RemoveBinary moves it.
 	InUse map[string]string
 	// LooseConfigDir makes EnsureConfigDir report that it tightened permissions.
 	LooseConfigDir bool
+	// Existing names files CreateFile finds already there; Created holds
+	// what it wrote.
+	Existing map[string]bool
+	Created  map[string][]byte
 	// Fail makes the named method return the error.
 	Fail map[string]error
 
 	mu          sync.Mutex
 	calls       []string
 	prompts     int
+	linePrompts int
 	registered  *winsvc.Registration
 	eventSource bool
 }
@@ -57,6 +65,13 @@ func (h *Host) Prompts() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.prompts
+}
+
+// LinePrompts returns how many times PromptLine was called.
+func (h *Host) LinePrompts() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.linePrompts
 }
 
 // Registered returns the last registration written, or nil.
@@ -116,6 +131,30 @@ func (h *Host) RemoveBinary(path string) (string, error) {
 func (h *Host) EnsureConfigDir(path string) (bool, error) {
 	err := h.record("EnsureConfigDir %s", path)
 	return h.LooseConfigDir, err
+}
+
+// FileExists implements winsvc.Host: Existing or Created has path.
+func (h *Host) FileExists(path string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, created := h.Created[path]
+	return h.Existing[path] || created
+}
+
+// CreateFile implements winsvc.Host: path is created unless Created or
+// Existing already has it.
+func (h *Host) CreateFile(path string, data []byte) (bool, error) {
+	err := h.record("CreateFile %s", path)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err != nil || h.Existing[path] {
+		return false, err
+	}
+	if h.Created == nil {
+		h.Created = map[string][]byte{}
+	}
+	h.Created[path] = append([]byte(nil), data...)
+	return true, nil
 }
 
 // Register implements winsvc.Host.
@@ -203,4 +242,12 @@ func (h *Host) PromptSecret(string) (string, error) {
 	defer h.mu.Unlock()
 	h.prompts++
 	return h.Secret, h.SecretErr
+}
+
+// PromptLine implements winsvc.Host.
+func (h *Host) PromptLine(string) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.linePrompts++
+	return h.Line, h.LineErr
 }

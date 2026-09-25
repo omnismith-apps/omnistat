@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/omnismith-apps/omnistat/internal/service"
 )
 
 // PlanUninstall decides everything `service uninstall` will do (FR-020),
 // changing nothing. The configuration directory is kept, and the Omnismith
 // project is never touched.
-func PlanUninstall(ctx context.Context, h Host) (*Plan, error) {
+func PlanUninstall(ctx context.Context, h Host) (*service.Plan, error) {
 	if !h.Elevated() {
 		return nil, ErrNotElevated
 	}
@@ -27,25 +29,25 @@ func PlanUninstall(ctx context.Context, h Host) (*Plan, error) {
 		return nil, fmt.Errorf("querying the service manager: %w", err)
 	}
 	if !inst.Exists {
-		return &Plan{NotInstalled: true}, nil
+		return &service.Plan{NotInstalled: true}, nil
 	}
 	if err := ours(inst, target); err != nil {
 		return nil, err
 	}
 
-	p := &Plan{Binary: target, Keep: []string{cfgDir + " (your configuration)"}}
+	p := &service.Plan{Binary: target, LogHint: LogHint, Keep: []string{cfgDir + " (your configuration)"}}
 	if inst.State != StateStopped {
-		p.add("stop the service (it publishes what it has buffered first)", func(ctx context.Context) (string, error) {
+		p.Add("stop the service (it publishes what it has buffered first)", func(ctx context.Context) (string, error) {
 			return "", h.Stop(ctx)
 		})
 	}
-	p.add("remove service "+Name+" and its stored settings", func(ctx context.Context) (string, error) {
+	p.Add("remove service "+Name+" and its stored settings", func(ctx context.Context) (string, error) {
 		return "", h.Delete(ctx)
 	})
-	p.add("remove event source "+EventSource+" from the Application log", func(context.Context) (string, error) {
+	p.Add("remove event source "+EventSource+" from the Application log", func(context.Context) (string, error) {
 		return "", h.EventSource(false)
 	})
-	p.add("remove "+target, func(context.Context) (string, error) {
+	p.Add("remove "+target, func(context.Context) (string, error) {
 		leftover, err := h.RemoveBinary(target)
 		return leftoverNote(target, progDir, leftover), err
 	})

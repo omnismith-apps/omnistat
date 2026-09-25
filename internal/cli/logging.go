@@ -4,14 +4,19 @@ import (
 	"io"
 	"log/slog"
 
+	"github.com/omnismith-apps/omnistat/internal/systemd"
 	"github.com/omnismith-apps/omnistat/internal/winsvc"
 )
 
 // newLogger builds the process logger (FR-028): to the Windows event log when
-// the app runs as a service (spec 006 FR-025), to w otherwise.
+// the app runs as a service (spec 006 FR-025), to the journal with priorities
+// under systemd (spec 007 FR-022), to w otherwise.
 func (a *App) newLogger(w io.Writer, level, format string) *slog.Logger {
 	if a.Events != nil {
 		return slog.New(winsvc.NewEventHandler(a.Events, parseLevel(level), format, nil))
+	}
+	if a.Journal != nil {
+		return slog.New(systemd.NewJournalHandler(a.Journal, parseLevel(level), format))
 	}
 	return newLogger(w, level, format)
 }

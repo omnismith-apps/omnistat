@@ -8,8 +8,9 @@ remapped in config to fit an existing schema or marketplace blueprint.
 
 > Status: **early.** Developed spec-first — see [`specs/README.md`](specs/README.md).
 > Features 001 (schema reconciliation), 002 (host identity), 003 (run loop, publisher,
-> `hostname` module), 004 (`cpu`, the first metric provider) and 005 (`memory`) are
-> implemented; the next specs add further value modules (`ip-address`, `disk`, …).
+> `hostname` module), 004 (`cpu`, the first metric provider), 005 (`memory`), 006
+> (Windows service) and 007 (systemd service) are implemented; the next specs add
+> further value modules (`ip-address`, `disk`, …).
 
 ## Why
 
@@ -58,6 +59,61 @@ collection, then every `publish.interval`; on SIGTERM/SIGINT it publishes what i
 buffered and exits 0. Observations are stamped when collected, so a network outage only
 delays them (the buffer holds up to 5 000 observations per metric).
 
+### Linux service (systemd)
+
+On Linux with systemd (version 239 or later: RHEL/Rocky/Alma 8+, Debian 11+,
+Ubuntu 20.04+, Fedora), omnistat installs itself as a hardened systemd service that
+starts at boot once the network is online, restarts after a failure and logs to the
+journal (spec 007). Unpack the archive anywhere and run:
+
+```bash
+sudo ./omnistat service install --dry-run   # what would change, the full unit included; changes nothing
+sudo ./omnistat service install             # asks for the project id and the token (no echo)
+```
+
+`sudo` drops your environment, so install asks for what it does not find. To script it,
+pass the settings through instead:
+
+```bash
+sudo --preserve-env=OMNISMITH_ACCESS_TOKEN,OMNISMITH_PROJECT_ID ./omnistat service install
+```
+
+Install checks the token, the project and the host identity before changing anything.
+It then does the following:
+
+| Path | What | Owner, mode |
+|------|------|-------------|
+| `/usr/local/bin/omnistat` | the binary, copied from where you ran install | root, 0755 |
+| `/etc/omnistat/omnistat.yaml` | a commented starter config (every default in force); only if absent, never overwritten | root, 0644 |
+| `/etc/omnistat/omnistat.env` | the token, project id and any `OMNISMITH_BASE_URL`, `OMNISTAT_IDENTITY` and proxy variables (either case) from your environment | root, **0600** |
+| `/etc/systemd/system/omnistat.service` | the unit, enabled and started | root, 0644 |
+
+The service runs as an unprivileged user that systemd allocates while it runs
+(`DynamicUser=`), with no capabilities, a read-only view of the system and systemd's
+sandbox (`systemd-analyze security omnistat` rates it about 1.1, "OK"). Only root can
+read the token or change the binary, the unit or the config. It tells systemd when it is
+ready, so a start with a bad token fails visibly.
+
+| Task | How |
+|------|-----|
+| Configure | edit `/etc/omnistat/omnistat.yaml`, check it with `omnistat --config /etc/omnistat/omnistat.yaml schema plan`, then `sudo systemctl restart omnistat` |
+| Upgrade | run `sudo ./omnistat service install` from the new version: binary and unit are replaced, settings and config are kept |
+| Rotate the token | `sudo /usr/local/bin/omnistat service install --replace-token` |
+| Change the proxy | `sudo HTTPS_PROXY=http://proxy:3128 /usr/local/bin/omnistat service install` (other settings are kept) |
+| Local unit changes | `sudo systemctl edit omnistat` — install rewrites the unit but never touches drop-ins |
+| Start / stop / status | `systemctl start`, `stop` (publishes what is buffered first), `status omnistat` |
+| Logs | `journalctl -u omnistat` (problems only: `-p warning`): the first publish, then a `publish summary` every 15 minutes, plus any failure as it happens |
+| Remove | `sudo /usr/local/bin/omnistat service uninstall` (keeps `/etc/omnistat` and your drop-ins; nothing is changed in the Omnismith project) |
+
+If you wrote an `omnistat.service` by hand before, install refuses to touch it: stop,
+disable and delete it (`systemctl disable --now omnistat`, remove the file,
+`systemctl daemon-reload`), then install. Hosts without systemd (Alpine/OpenRC,
+containers) run `omnistat run --daemon` under their own supervisor. macOS has no
+service command.
+
+The commands above spell out `/usr/local/bin/omnistat` because `sudo` on RHEL-family
+systems does not search `/usr/local/bin`.
+
 ### Windows service
 
 On Windows, omnistat installs itself as a service that starts at boot, restarts after a
@@ -68,7 +124,7 @@ failure and logs to Event Viewer (spec 006). Unzip the archive anywhere and, in 
 $env:OMNISMITH_PROJECT_ID = "<project uuid>"
 .\omnistat.exe identity                         # optional: check the identity first
 .\omnistat.exe service install --dry-run        # what would change; changes nothing
-.\omnistat.exe service install                  # asks for the token without echoing it
+.\omnistat.exe service install                  # asks for the token without echoing it (and the project id if unset)
 ```
 
 Install checks the token, the project and the host identity before changing anything.
@@ -80,6 +136,8 @@ It then does the following:
 - stores the token, project id and any `OMNISMITH_BASE_URL`, `OMNISTAT_IDENTITY`,
   `HTTPS_PROXY`, `HTTP_PROXY` or `NO_PROXY` from your environment as the service's own
   environment, readable only by Administrators and SYSTEM;
+- creates `C:\ProgramData\omnistat\omnistat.yaml`, a commented starter config, if there
+  is none (an existing one is never changed);
 - starts the service.
 
 Type the token at the prompt rather than setting `$env:OMNISMITH_ACCESS_TOKEN`: PowerShell
@@ -87,7 +145,7 @@ saves typed commands to its history file. For a scripted install the variable wo
 
 | Task | How |
 |------|-----|
-| Configure | `C:\ProgramData\omnistat\omnistat.yaml` (optional; only administrators can edit it), then restart the service |
+| Configure | `C:\ProgramData\omnistat\omnistat.yaml` (only administrators can edit it), then restart the service |
 | Upgrade | run `service install` from the new version: the binary is replaced, settings are kept |
 | Rotate the token | `service install --replace-token` |
 | Change the proxy | set `$env:HTTPS_PROXY`, then `service install` |
@@ -132,7 +190,9 @@ The host identity is derived from the OS machine id (`/etc/machine-id` on Linux,
 the platform UUID on macOS) as a keyed hash — the raw id is never published. Pin it
 for clones or containers with `OMNISTAT_IDENTITY=…` or `identity.static` in the config.
 
-Optional `omnistat.yaml` (picked up from the working directory, or `--config`):
+Optional `omnistat.yaml` (picked up from the working directory, or `--config`; the
+services read `/etc/omnistat/omnistat.yaml` and `C:\ProgramData\omnistat\omnistat.yaml`,
+where install leaves a commented starter):
 
 ```yaml
 project_id: 01a0c47a-...

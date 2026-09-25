@@ -1,0 +1,59 @@
+# Written by `omnistat service install`; every install rewrites this file.
+# Local changes belong in a drop-in, which install keeps: systemctl edit omnistat
+# https://github.com/omnismith-apps/omnistat
+
+[Unit]
+Description=omnistat (Omnismith exporter)
+Documentation=https://github.com/omnismith-apps/omnistat
+Wants=network-online.target
+After=network-online.target
+# Keep trying after failures, however many (spec 007 FR-009).
+StartLimitIntervalSec=0
+
+[Service]
+# omnistat tells systemd when it is ready: config loaded, schema reconciled,
+# host identity resolved (FR-010). On stop it extends the stop timeout itself
+# to cover its final publish (FR-023).
+Type=notify
+ExecStart=/usr/local/bin/omnistat --config /etc/omnistat/omnistat.yaml run --daemon
+# The access token and other settings; readable by root only (FR-013).
+EnvironmentFile=/etc/omnistat/omnistat.env
+# Restart one minute after any failure; never after a deliberate stop (FR-009).
+Restart=on-failure
+RestartSec=60
+TimeoutStartSec=180
+
+# Least privilege (FR-008): an unprivileged user allocated while the service
+# runs, no capabilities, a read-only system, and systemd's sandbox.
+DynamicUser=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateUsers=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+UMask=0077
+RemoveIPC=yes
+DevicePolicy=closed
+
+[Install]
+WantedBy=multi-user.target

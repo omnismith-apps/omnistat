@@ -17,6 +17,7 @@ import (
 	"github.com/omnismith-apps/omnistat/internal/collect"
 	"github.com/omnismith-apps/omnistat/internal/config"
 	"github.com/omnismith-apps/omnistat/internal/module"
+	"github.com/omnismith-apps/omnistat/internal/systemd"
 	"github.com/omnismith-apps/omnistat/internal/winsvc"
 )
 
@@ -39,9 +40,12 @@ const (
 // DefaultConfig is the config file used when --config is absent, and only if it
 // exists; empty means ./omnistat.yaml. Events, when set, receives every log
 // record instead of stderr. The Windows service sets both (spec 006 FR-012,
-// FR-025). ServiceHost is the Windows service manager seam of `omnistat
-// service` (FR-005); nil means the real one. ServiceSettle shortens install's
-// post-start watch in tests; 0 means 5s (FR-011).
+// FR-025). Journal, when set, is the journal stream that receives every log
+// record with its priority (spec 007 FR-022). ServiceHost and SystemdHost are
+// the Windows service manager and systemd seams of `omnistat service`
+// (006 NFR-003, 007 NFR-004), set by tests; with neither, the platform's own
+// is used. ServiceSettle shortens install's post-start watch in tests; 0
+// means 5s (FR-011).
 type App struct {
 	Registry      *module.Registry
 	Version       string
@@ -50,7 +54,9 @@ type App struct {
 	GOOS          string
 	DefaultConfig string
 	Events        winsvc.Sink
+	Journal       io.Writer
 	ServiceHost   winsvc.Host
+	SystemdHost   systemd.Host
 	ServiceSettle time.Duration
 }
 
@@ -156,11 +162,13 @@ Commands:
                          (exit 0 ok, 2 some module failed, 1 error); --daemon keeps collecting and
                          publishes every publish.interval; --dry-run prints what would be sent
   service install [--dry-run] [--replace-token]
-                         Windows: install (or update) omnistat as a service that runs from boot;
-                         needs an elevated prompt; the token is read from OMNISMITH_ACCESS_TOKEN
-                         or asked for without echo
+                         install (or update) omnistat as a service that runs from boot: a Windows
+                         service, or a systemd unit on Linux; needs an elevated prompt (Windows)
+                         or root (sudo); the token is read from OMNISMITH_ACCESS_TOKEN or asked
+                         for without echo, a missing project id is asked for
   service uninstall [--dry-run]
-                         Windows: remove the service, its stored settings and the installed binary
+                         remove the service, its stored settings and the installed binary;
+                         the configuration is kept
   version                print the version
   help                   this text
 

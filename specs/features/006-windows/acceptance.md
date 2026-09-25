@@ -319,6 +319,38 @@ Expect: after reinstalling, the report shows the **same entity** id as before. F
 with `.\omnistat.exe service uninstall` if the VM is not kept, and remove the test user
 with `net user omnistd /delete`.
 
+## 17. Amendments by spec 007 (next rc) — 007 FR-014, FR-017, NFR-006
+
+Run on a VM where omnistat is not installed, in the elevated window, with **no**
+`OMNISMITH_*` variables set (open a new window). If `C:\ProgramData\omnistat\omnistat.yaml`
+exists from an earlier run, rename it first.
+
+```powershell
+.\omnistat.exe service install --dry-run
+```
+Expect: install **asks for the project id** (with echo), then the token (hidden). The
+summary shows `config: C:\ProgramData\omnistat\omnistat.yaml (not present — install
+creates a commented starter…)`, and the steps include `would create
+C:\ProgramData\omnistat\omnistat.yaml: a commented starter configuration`.
+
+```powershell
+.\omnistat.exe service install
+Get-Content C:\ProgramData\omnistat\omnistat.yaml -TotalCount 12
+icacls C:\ProgramData\omnistat\omnistat.yaml
+```
+Expect: installed and running; the file starts with `# omnistat configuration`, every
+setting commented out; its ACL is the directory's (SYSTEM and Administrators full,
+Authenticated Users read), so the standard user of step 7 cannot write it. Then add a
+line and install again:
+
+```powershell
+Add-Content C:\ProgramData\omnistat\omnistat.yaml 'log: {level: debug}'
+.\omnistat.exe service install
+Get-Content C:\ProgramData\omnistat\omnistat.yaml -Tail 1      # still your line
+```
+Expect: no project or token prompt (both stored), no "create …omnistat.yaml" step, your
+line kept, and debug events in the Application log after the restart.
+
 ## Results
 
 Mark each row ✅ / ❌ / ⚠️ and add a note for anything that is not ✅.
@@ -341,6 +373,7 @@ Mark each row ✅ / ❌ / ⚠️ and add a note for anything that is not ✅.
 | 14 | reboot, nobody logged in | | |
 | 15 | upgrade, no prompt; dead proxy → refused | | |
 | 16 | uninstall, deferred delete, reinstall → same entity | | |
+| 17 | 007: project prompt; starter config created once, ACL inherited, kept | | |
 
 **Send back:**
 - this table;
