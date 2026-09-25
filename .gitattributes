@@ -1,0 +1,5 @@
+# Keep LF everywhere, including Windows checkouts (Git for Windows defaults to CRLF),
+# so testdata and golden output compare byte-for-byte on every OS (spec 006 NFR-004).
+* text=auto eol=lf
+*.exe binary
+*.zip binary

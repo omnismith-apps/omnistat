@@ -18,12 +18,21 @@ import (
 	"github.com/omnismith-apps/omnistat/internal/module/hostname"
 	"github.com/omnismith-apps/omnistat/internal/module/machineid"
 	"github.com/omnismith-apps/omnistat/internal/module/memory"
+	"github.com/omnismith-apps/omnistat/internal/winsvc"
 )
 
 // version is set at build time via -ldflags "-X main.version=...".
 var version = "dev"
 
 func main() {
+	// Started by the Windows service manager: stop requests instead of signals,
+	// the Application log instead of stderr, the service's config file (spec 006).
+	if winsvc.IsService() {
+		os.Exit(winsvc.Run(func(ctx context.Context, events winsvc.Sink, configPath string) int {
+			app := &cli.App{Registry: registry(), Version: resolveVersion(), DefaultConfig: configPath, Events: events}
+			return app.Run(ctx, os.Args[1:], winsvc.LineWriter(events.Info), winsvc.LineWriter(events.Error), os.Getenv)
+		}))
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	// The first signal cancels ctx (the daemon then flushes and exits, spec 003
 	// FR-020); releasing the handler right away lets a second signal terminate

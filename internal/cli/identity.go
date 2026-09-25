@@ -23,7 +23,14 @@ type identityReport struct {
 	WouldCreate bool     `json:"would_create"`
 	Duplicates  []string `json:"duplicates,omitempty"`
 	Error       string   `json:"error,omitempty"`
+
+	err error // the resolution error behind Error, for the install pre-check
 }
+
+// errSchemaNotReady: the project has no identity attribute yet. `identity`
+// reports it; the service install pre-check accepts it, because the service
+// reconciles the schema when it starts (spec 006 FR-006).
+var errSchemaNotReady = errors.New("schema is not ready for identity")
 
 // identity implements `omnistat identity` (spec 002 FR-017): the identity
 // value and source always; the resolution result when the project is
@@ -35,18 +42,29 @@ func (a *App) identity(e env, args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
-	s, err := config.Load(e.config, e.getenv)
+	s, err := e.loadConfig()
 	if err != nil {
 		return fail(e, err)
 	}
+	rep, err := a.identityCheck(e, s)
+	if err != nil {
+		return fail(e, err)
+	}
+	return a.printIdentity(e, rep, *asJSON)
+}
+
+// identityCheck is the read-only core of `omnistat identity`: the identity and
+// its source always, the resolution when the project is reachable (spec 002
+// FR-017). The service install pre-check runs it too (spec 006 FR-006).
+func (a *App) identityCheck(e env, s config.Settings) (identityReport, error) {
 	mod, ok := a.Registry.Get(machineid.Name)
 	provider, isProvider := mod.(*machineid.Module)
 	if !ok || !isProvider {
-		return fail(e, errors.New("machine-id module is not available in this build"))
+		return identityReport{}, errors.New("machine-id module is not available in this build")
 	}
 	id, err := provider.Discover(e.ctx, s.Identity)
 	if err != nil {
-		return fail(e, err)
+		return identityReport{}, err
 	}
 	rep := identityReport{Identity: id.Value, Source: id.Source}
 
@@ -54,10 +72,10 @@ func (a *App) identity(e env, args []string) int {
 	if s.RequireAPI() == nil {
 		rep.Project = true
 		if err := a.resolveDryRun(e, s, id, &rep); err != nil {
-			rep.Error = err.Error()
+			rep.Error, rep.err = err.Error(), err
 		}
 	}
-	return a.printIdentity(e, rep, *asJSON)
+	return rep, nil
 }
 
 func (a *App) resolveDryRun(e env, s config.Settings, id machineid.Identity, rep *identityReport) error {
@@ -93,7 +111,7 @@ func identityTarget(desired manifest.Desired, resolved schema.Resolved) (identit
 	tplID, tplOK := resolved.Templates[tplSlug]
 	_, attrOK := resolved.Attributes[attr.Slug]
 	if !tplOK || !attrOK {
-		return identity.Target{}, fmt.Errorf("schema is not ready for identity (template %q / attribute %q): run `omnistat schema plan`", tplSlug, attr.Slug)
+		return identity.Target{}, fmt.Errorf("%w (template %q / attribute %q): run `omnistat schema plan`", errSchemaNotReady, tplSlug, attr.Slug)
 	}
 	return identity.Target{TemplateSlug: tplSlug, TemplateID: tplID, AttributeSlug: attr.Slug}, nil
 }

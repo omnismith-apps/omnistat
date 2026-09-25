@@ -12,10 +12,12 @@ import (
 	"log/slog"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/omnismith-apps/omnistat/internal/collect"
 	"github.com/omnismith-apps/omnistat/internal/config"
 	"github.com/omnismith-apps/omnistat/internal/module"
+	"github.com/omnismith-apps/omnistat/internal/winsvc"
 )
 
 // Exit codes. Plan uses ExitChanges to tell scripts changes are pending
@@ -33,12 +35,23 @@ const (
 // overrides the metric buffer bound; 0 means the spec's 5 000 (FR-008).
 // GOOS decides which attributes are collectable here (spec 004 FR-019);
 // empty means the platform this binary runs on. All three exist for tests.
+//
+// DefaultConfig is the config file used when --config is absent, and only if it
+// exists; empty means ./omnistat.yaml. Events, when set, receives every log
+// record instead of stderr. The Windows service sets both (spec 006 FR-012,
+// FR-025). ServiceHost is the Windows service manager seam of `omnistat
+// service` (FR-005); nil means the real one. ServiceSettle shortens install's
+// post-start watch in tests; 0 means 5s (FR-011).
 type App struct {
-	Registry     *module.Registry
-	Version      string
-	Clock        collect.Clock
-	MaxPerMetric int
-	GOOS         string
+	Registry      *module.Registry
+	Version       string
+	Clock         collect.Clock
+	MaxPerMetric  int
+	GOOS          string
+	DefaultConfig string
+	Events        winsvc.Sink
+	ServiceHost   winsvc.Host
+	ServiceSettle time.Duration
 }
 
 // goos is the platform the collectable check gates on (spec 004 FR-017…022).
@@ -57,6 +70,13 @@ type env struct {
 	getenv func(string) string
 	log    *slog.Logger
 	config string // --config path
+	// defaultConfig is probed when config is empty (spec 006 FR-012).
+	defaultConfig string
+}
+
+// loadConfig loads the settings every command runs with.
+func (e env) loadConfig() (config.Settings, error) {
+	return config.LoadWithDefault(e.config, e.defaultConfig, e.getenv)
 }
 
 // Run executes args (without the program name) and returns the exit code.
@@ -81,9 +101,13 @@ func (a *App) Run(ctx context.Context, args []string, stdout, stderr io.Writer, 
 
 	// Logging is configured from flags first so config errors are logged too;
 	// config values fill in what flags left empty.
+	defaultConfig := config.DefaultPath
+	if a.DefaultConfig != "" {
+		defaultConfig = a.DefaultConfig
+	}
 	level, format := *logLevel, *logFormat
 	if level == "" || format == "" {
-		if s, err := config.Load(*cfgPath, getenv); err == nil {
+		if s, err := config.LoadWithDefault(*cfgPath, defaultConfig, getenv); err == nil {
 			if level == "" {
 				level = s.Log.Level
 			}
@@ -92,7 +116,7 @@ func (a *App) Run(ctx context.Context, args []string, stdout, stderr io.Writer, 
 			}
 		}
 	}
-	e := env{ctx: ctx, stdout: stdout, stderr: stderr, getenv: getenv, log: newLogger(stderr, level, format), config: *cfgPath}
+	e := env{ctx: ctx, stdout: stdout, stderr: stderr, getenv: getenv, log: a.newLogger(stderr, level, format), config: *cfgPath, defaultConfig: defaultConfig}
 
 	switch rest[0] {
 	case "version":
@@ -104,6 +128,8 @@ func (a *App) Run(ctx context.Context, args []string, stdout, stderr io.Writer, 
 		return a.identity(e, rest[1:])
 	case "run":
 		return a.run(e, rest[1:])
+	case "service":
+		return a.service(e, rest[1:])
 	case "help", "-h", "--help":
 		a.usage(stdout, fs)
 		return ExitOK
@@ -129,6 +155,12 @@ Commands:
                          reconcile, resolve the host entity, collect every module and publish once
                          (exit 0 ok, 2 some module failed, 1 error); --daemon keeps collecting and
                          publishes every publish.interval; --dry-run prints what would be sent
+  service install [--dry-run] [--replace-token]
+                         Windows: install (or update) omnistat as a service that runs from boot;
+                         needs an elevated prompt; the token is read from OMNISMITH_ACCESS_TOKEN
+                         or asked for without echo
+  service uninstall [--dry-run]
+                         Windows: remove the service, its stored settings and the installed binary
   version                print the version
   help                   this text
 

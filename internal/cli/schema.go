@@ -25,7 +25,7 @@ type prepared struct {
 // prepare runs steps 1–4 of the data flow: config → modules → manifests →
 // desired; client; one schema read (NFR-002).
 func (a *App) prepare(e env) (prepared, error) {
-	s, err := config.Load(e.config, e.getenv)
+	s, err := e.loadConfig()
 	if err != nil {
 		return prepared{}, err
 	}

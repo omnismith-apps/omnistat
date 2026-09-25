@@ -33,6 +33,25 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
+      - name: lint (windows build)
+        uses: golangci/golangci-lint-action@v8
+        env:
+          GOOS: windows
+        with:
+          version: latest
       - run: make test-race
       - run: make build
       - run: make crosscheck
+
+  # ADR-0010 / spec 006 NFR-004: the unit tests also run on Windows. Lint, race and the
+  # tidy/fmt gates stay on Linux; they do not depend on the OS.
+  go-windows:
+    name: go (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test ./...

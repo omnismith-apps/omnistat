@@ -58,6 +58,47 @@ collection, then every `publish.interval`; on SIGTERM/SIGINT it publishes what i
 buffered and exits 0. Observations are stamped when collected, so a network outage only
 delays them (the buffer holds up to 5 000 observations per metric).
 
+### Windows service
+
+On Windows, omnistat installs itself as a service that starts at boot, restarts after a
+failure and logs to Event Viewer (spec 006). Unzip the archive anywhere and, in an
+**elevated** PowerShell (Run as administrator):
+
+```powershell
+$env:OMNISMITH_PROJECT_ID = "<project uuid>"
+.\omnistat.exe identity                         # optional: check the identity first
+.\omnistat.exe service install --dry-run        # what would change; changes nothing
+.\omnistat.exe service install                  # asks for the token without echoing it
+```
+
+Install checks the token, the project and the host identity before changing anything.
+It then does the following:
+
+- copies itself to `C:\Program Files\omnistat\omnistat.exe`;
+- registers the service `omnistat` (automatic, delayed start, account
+  `NT SERVICE\omnistat`, restarted one minute after any failure);
+- stores the token, project id and any `OMNISMITH_BASE_URL`, `OMNISTAT_IDENTITY`,
+  `HTTPS_PROXY`, `HTTP_PROXY` or `NO_PROXY` from your environment as the service's own
+  environment, readable only by Administrators and SYSTEM;
+- starts the service.
+
+Type the token at the prompt rather than setting `$env:OMNISMITH_ACCESS_TOKEN`: PowerShell
+saves typed commands to its history file. For a scripted install the variable works too.
+
+| Task | How |
+|------|-----|
+| Configure | `C:\ProgramData\omnistat\omnistat.yaml` (optional; only administrators can edit it), then restart the service |
+| Upgrade | run `service install` from the new version: the binary is replaced, settings are kept |
+| Rotate the token | `service install --replace-token` |
+| Change the proxy | set `$env:HTTPS_PROXY`, then `service install` |
+| Start / stop | Services, `Start-Service omnistat`, `Stop-Service omnistat` (a stop publishes what is buffered first) |
+| Logs | Event Viewer → Windows Logs → Application, source `omnistat` |
+| Remove | `service uninstall` (the config directory is kept; nothing is changed in the Omnismith project) |
+
+The binary is not code-signed yet, so SmartScreen may warn when you first run the
+downloaded `omnistat.exe`. On Windows, `load_avg_*` is not collected: Windows has no
+load average.
+
 ### Modules
 
 | Module | Publishes | Default cadence |
@@ -146,7 +187,8 @@ and nothing is written.
    [GoReleaser](https://goreleaser.com) (`.goreleaser.yaml`), and publishes a GitHub
    Release with the archives, `checksums.txt`, and that changelog section as its notes.
    The job fails if the tag has no changelog section. A tag with a suffix
-   (`v0.2.0-rc.1`) is published as a pre-release.
+   (`v0.2.0-rc.1`) is published as a pre-release, and uses the *Unreleased* section
+   when it has none of its own, so a release candidate needs no changelog edit.
 
 `make release-snapshot` builds the same archives into `dist/` without publishing
 anything, and `make release-check` validates the config.

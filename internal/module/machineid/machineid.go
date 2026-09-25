@@ -24,9 +24,10 @@ const Name = "machine-id"
 
 // Identity sources (FR-017).
 const (
-	SourceStatic = "static"
-	SourceLinux  = "linux-machine-id"
-	SourceDarwin = "darwin-platform-uuid"
+	SourceStatic  = "static"
+	SourceLinux   = "linux-machine-id"
+	SourceDarwin  = "darwin-platform-uuid"
+	SourceWindows = "windows-machine-guid" // spec 006 FR-003
 )
 
 // MaxStaticLen bounds a static identity (FR-008).
@@ -47,12 +48,15 @@ type Identity struct {
 }
 
 // Module is the machine-id module. The zero value is not usable; call New.
-// FS, Run and GOOS are injectable for tests.
+// FS, IOReg, MachineGUID and GOOS are injectable for tests.
 type Module struct {
 	// FS is the root file system (paths without leading slash).
 	FS fs.FS
 	// IOReg returns the output of `ioreg -rd1 -c IOPlatformExpertDevice` (macOS).
 	IOReg func(ctx context.Context) ([]byte, error)
+	// MachineGUID returns the machine GUID Windows keeps for the OS
+	// installation (spec 006 FR-002).
+	MachineGUID func() (string, error)
 	// GOOS selects the discovery strategy.
 	GOOS string
 }
@@ -64,7 +68,8 @@ func New() *Module {
 		IOReg: func(ctx context.Context) ([]byte, error) {
 			return exec.CommandContext(ctx, "ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Output()
 		},
-		GOOS: runtime.GOOS,
+		MachineGUID: readMachineGUID,
+		GOOS:        runtime.GOOS,
 	}
 }
 
@@ -135,6 +140,10 @@ func (m *Module) Discover(ctx context.Context, static string) (Identity, error) 
 		source = SourceDarwin
 		looked = append(looked, "ioreg IOPlatformUUID")
 		raw = m.platformUUID(ctx)
+	case "windows":
+		source = SourceWindows
+		looked = append(looked, machineGUIDLocation)
+		raw = m.machineGUID()
 	default:
 		return Identity{}, fmt.Errorf("%w: autodiscovery is not supported on %s; set identity.static or OMNISTAT_IDENTITY", ErrNoIdentity, m.GOOS)
 	}
@@ -168,6 +177,14 @@ func (m *Module) platformUUID(ctx context.Context) string {
 		return present(strings.Trim(strings.TrimSpace(after), `"`))
 	}
 	return ""
+}
+
+func (m *Module) machineGUID() string {
+	v, err := m.MachineGUID()
+	if err != nil {
+		return ""
+	}
+	return present(v)
 }
 
 // present trims and rejects empty or all-zero ids (FR-004).

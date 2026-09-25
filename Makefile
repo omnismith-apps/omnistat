@@ -4,7 +4,7 @@ VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 GORELEASER := go run github.com/goreleaser/goreleaser/v2@v2.17.1
 
-.PHONY: all build crosscheck release-check release-snapshot run test test-race lint vet fmt tidy sandbox specs-check clean help
+.PHONY: all build crosscheck vet-windows release-check release-snapshot run test test-race lint vet fmt tidy sandbox specs-check clean help
 
 # Every target constitution V requires a static binary for, plus the Windows pairs
 # that 004 NFR-005 keeps compiling so the cross-platform readings cannot rot.
@@ -16,7 +16,7 @@ build: ## Build ./bin/omnistat
 	@mkdir -p bin
 	go build -trimpath -ldflags '$(LDFLAGS)' -o bin/$(BINARY) ./cmd/$(BINARY)
 
-crosscheck: ## Verify the binary builds CGO-free for every target (004 NFR-005)
+crosscheck: vet-windows ## Verify the binary builds CGO-free for every target (004 NFR-005)
 	@set -e; for pair in $(CROSS); do \
 	  goos=$${pair%%/*}; goarch=$${pair##*/}; \
 	  printf '  %-16s' "$$pair"; \
@@ -30,6 +30,9 @@ release-check: ## Validate .goreleaser.yaml
 release-snapshot: ## Build every release archive locally into dist/ (nothing is published)
 	$(GORELEASER) release --snapshot --clean
 
+vet-windows: ## Type-check every package and test file for Windows (spec 006 NFR-004)
+	GOOS=windows go vet ./...
+
 run: ## Run from source: make run ARGS="schema plan" (sources ./.env if present)
 	@set -a; [ -f .env ] && . ./.env; set +a; go run ./cmd/$(BINARY) $(ARGS)
 
@@ -39,8 +42,9 @@ test: ## Unit tests
 test-race: ## Unit tests with the race detector and coverage
 	go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
-lint: ## golangci-lint (install: https://golangci-lint.run/docs/welcome/install/)
+lint: ## golangci-lint for the host build and the Windows build (install: https://golangci-lint.run/docs/welcome/install/)
 	golangci-lint run ./...
+	GOOS=windows golangci-lint run ./...
 
 vet: ## go vet
 	go vet ./...

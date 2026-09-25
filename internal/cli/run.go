@@ -36,7 +36,7 @@ func (a *App) run(e env, args []string) int {
 		clock = collect.RealClock{}
 	}
 
-	s, err := config.Load(e.config, e.getenv)
+	s, err := e.loadConfig()
 	if err != nil {
 		return fail(e, err)
 	}

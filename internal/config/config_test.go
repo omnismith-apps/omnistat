@@ -132,6 +132,39 @@ func TestLoad_DefaultPath(t *testing.T) {
 	}
 }
 
+// Spec 006 FR-012: the service probes its own config path instead of the working
+// directory (System32 for a service). Absent → defaults, and ./omnistat.yaml is
+// not consulted; present → loaded.
+func TestLoadWithDefault_ServicePath(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	if err := writeFile(cwd+"/omnistat.yaml", "project_id: from_cwd\n"); err != nil {
+		t.Fatal(err)
+	}
+	svcPath := t.TempDir() + "/omnistat.yaml"
+
+	s, err := config.LoadWithDefault("", svcPath, env(nil))
+	if err != nil || s.ProjectID != "" || s.Path != "" {
+		t.Fatalf("absent service config must give defaults without a cwd probe: %+v %v", s, err)
+	}
+	if err := writeFile(svcPath, "project_id: from_service_dir\n"); err != nil {
+		t.Fatal(err)
+	}
+	s, err = config.LoadWithDefault("", svcPath, env(nil))
+	if err != nil || s.ProjectID != "from_service_dir" || s.Path != svcPath {
+		t.Fatalf("service config: %+v %v", s, err)
+	}
+	// An explicit --config still wins over the probe.
+	s, err = config.LoadWithDefault(cwd+"/omnistat.yaml", svcPath, env(nil))
+	if err != nil || s.ProjectID != "from_cwd" {
+		t.Fatalf("explicit path: %+v %v", s, err)
+	}
+	// Load keeps its console behaviour: it probes ./omnistat.yaml.
+	if s, err = config.Load("", env(nil)); err != nil || s.ProjectID != "from_cwd" {
+		t.Fatalf("console default: %+v %v", s, err)
+	}
+}
+
 // Spec 002 FR-008/009: static identity from file, env wins, validation.
 func TestLoad_Identity(t *testing.T) {
 	dir := t.TempDir()

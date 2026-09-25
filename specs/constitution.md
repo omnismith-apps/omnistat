@@ -1,8 +1,9 @@
 ---
 status: ratified
-version: 1.0.0
+version: 1.1.0
 ratified: 2026-09-21
-amended_by: []
+amended: 2026-09-25
+amended_by: [0010]
 ---
 
 # omnistat Constitution
@@ -78,8 +79,13 @@ blueprint or predefined schema.
 - Every functional requirement maps to at least one automated test; the Omnismith
   API is faked with `net/http/httptest` in `go test`, never called for real.
 - One static binary (`CGO_ENABLED=0`), cross-compiled for `linux/amd64`, `linux/arm64`,
-  `darwin/amd64`, `darwin/arm64`. Linux is the primary target; a module that cannot
-  support a platform says so in its manifest and is skipped there, not stubbed.
+  `darwin/amd64`, `darwin/arm64`, `windows/amd64` and `windows/arm64`. Linux is the
+  primary target; a module that cannot support a platform says so in its manifest and
+  is skipped there, not stubbed.
+- Windows is supported (ADR-0010): every feature specifies its Windows behaviour or
+  declares it unsupported. The unit tests run on Windows in CI. A feature that adds or
+  changes platform-specific behaviour is accepted on a `windows/amd64` host as well as
+  on Linux. `windows/arm64` is built and released but not accepted.
 - Logs are structured (`log/slog`), levelled, and never include secrets or full
   request bodies. Health/self-metrics are added only when a spec requires them.
 

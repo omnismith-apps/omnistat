@@ -1,0 +1,52 @@
+package winsvc
+
+import (
+	"context"
+	"fmt"
+)
+
+// PlanUninstall decides everything `service uninstall` will do (FR-020),
+// changing nothing. The configuration directory is kept, and the Omnismith
+// project is never touched.
+func PlanUninstall(ctx context.Context, h Host) (*Plan, error) {
+	if !h.Elevated() {
+		return nil, ErrNotElevated
+	}
+	progDir, err := h.ProgramDir()
+	if err != nil {
+		return nil, fmt.Errorf("locating the program directory: %w", err)
+	}
+	cfgDir, err := h.ConfigDir()
+	if err != nil {
+		return nil, fmt.Errorf("locating the configuration directory: %w", err)
+	}
+	target := winJoin(progDir, BinaryName)
+	inst, err := h.Service(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("querying the service manager: %w", err)
+	}
+	if !inst.Exists {
+		return &Plan{NotInstalled: true}, nil
+	}
+	if err := ours(inst, target); err != nil {
+		return nil, err
+	}
+
+	p := &Plan{Binary: target, Keep: []string{cfgDir + " (your configuration)"}}
+	if inst.State != StateStopped {
+		p.add("stop the service (it publishes what it has buffered first)", func(ctx context.Context) (string, error) {
+			return "", h.Stop(ctx)
+		})
+	}
+	p.add("remove service "+Name+" and its stored settings", func(ctx context.Context) (string, error) {
+		return "", h.Delete(ctx)
+	})
+	p.add("remove event source "+EventSource+" from the Application log", func(context.Context) (string, error) {
+		return "", h.EventSource(false)
+	})
+	p.add("remove "+target, func(context.Context) (string, error) {
+		deferred, err := h.RemoveBinary(target)
+		return noteIf(deferred, target+" is the running program; Windows removes it at the next restart"), err
+	})
+	return p, nil
+}

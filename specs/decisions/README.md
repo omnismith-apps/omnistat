@@ -14,5 +14,7 @@ Numbered `NNNN-kebab-title.md`; never edit a decision after acceptance — super
 | [0007](0007-platform-gating-declares-schema-everywhere.md) | Platform support is declared per attribute; the schema is declared everywhere | accepted |
 | [0008](0008-gopsutil-as-the-host-reading-source.md) | Host readings come from gopsutil, not from hand-written per-OS sources | accepted |
 | [0009](0009-host-readings-live-in-one-core-package.md) | Host readings live in one core package | accepted |
+| [0010](0010-windows-is-a-supported-platform.md) | Windows is a supported platform | accepted |
+| [0011](0011-windows-service-security-model.md) | The Windows service's security model | accepted |
 
 Start from `../templates/adr.md`.

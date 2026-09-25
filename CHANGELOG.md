@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 ## [Unreleased]
 
 ### Added
+- omnistat runs on Windows (feature 006, ADR-0010). The host identity comes from Windows' machine GUID, derived like the other sources (`windows-machine-guid`).
+- `omnistat service install` (Windows) installs omnistat as a service:
+  - copies the binary to `Program Files`;
+  - runs it as `NT SERVICE\omnistat` with a delayed automatic start and a restart one minute after any failure;
+  - stores the token and settings as the service's environment, readable only by Administrators and SYSTEM, with the token asked for without echo;
+  - checks the token, project and identity before changing anything.
+
+  Running it again upgrades the service; `--replace-token` rotates the token, and `--dry-run` shows every change. `omnistat service uninstall` removes it all except the config directory (ADR-0011).
+- As a service, omnistat logs to the Windows Application log (source `omnistat`) and reads `%ProgramData%\omnistat\omnistat.yaml`. A stop, shutdown or preshutdown request publishes what is buffered, as SIGTERM does.
+- CI runs the unit tests on Windows, and `make lint`/`make crosscheck` also check the Windows build.
+- Spec 006 (omnistat on Windows); ADR-0010 (Windows is a supported platform; constitution 1.1.0); ADR-0011 (the Windows service's security model).
 - Release pipeline: pushing a `vX.Y.Z` tag publishes a GitHub Release with static binaries for linux, darwin and windows on amd64 and arm64 (`tar.gz`, `zip` on Windows), plus `checksums.txt`. The tag's CHANGELOG section becomes the release notes. GoReleaser (`.goreleaser.yaml`) and `.github/workflows/release.yml`; `make release-snapshot` and `make release-check` run it locally.
 - `memory` module: `mem_used_pct` and `mem_available_mib` as metrics and `mem_total_mib` as a dimension, collected every 30s by default (feature 005). "Available" is the OS's own estimate of memory usable without swapping; amounts are whole MiB. macOS publishes only the total, because it maintains no available-memory estimate.
 - Spec 005 (`memory` module); ADR-0009 (host readings live in one core package).

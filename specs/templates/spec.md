@@ -14,6 +14,7 @@ One paragraph: the problem, who has it, and what changes for them when this ship
 ## Users & context
 - **Who** uses this and in what situation.
 - **Where** it runs (host, container, CI, laptop) and what it can assume about the environment.
+- **Platforms**: Linux, macOS, Windows — what differs on each, or which are unsupported and why (ADR-0010).
 
 ## User stories
 ### US-1 — <title> (priority: P1)

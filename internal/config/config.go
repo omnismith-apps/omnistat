@@ -126,10 +126,20 @@ type attributeFile struct {
 	Description string `yaml:"description"`
 }
 
-// Load reads path (or DefaultPath when path is "" and it exists), applies
+// Load reads path (or DefaultPath when path is "" and it exists), exactly like
+// LoadWithDefault(path, DefaultPath, getenv).
+func Load(path string, getenv func(string) string) (Settings, error) {
+	return LoadWithDefault(path, DefaultPath, getenv)
+}
+
+// LoadWithDefault reads path (or defaultPath when path is "" and it exists), applies
 // environment overrides via getenv, validates, and returns Settings. Missing
 // token/project are not errors here; see Settings.RequireAPI.
-func Load(path string, getenv func(string) string) (Settings, error) {
+//
+// defaultPath is the probe: ./omnistat.yaml for a console run, the service's own
+// config file for the Windows service, whose working directory is System32 and
+// must never be probed (spec 006 FR-012). "" disables the probe.
+func LoadWithDefault(path, defaultPath string, getenv func(string) string) (Settings, error) {
 	var s Settings
 	s.Modules = map[string]bool{}
 	s.Intervals = map[string]time.Duration{}
@@ -141,9 +151,9 @@ func Load(path string, getenv func(string) string) (Settings, error) {
 	s.Log.Level, s.Log.Format = "info", "text"
 
 	var f file
-	if path == "" {
-		if _, err := os.Stat(DefaultPath); err == nil {
-			path = DefaultPath
+	if path == "" && defaultPath != "" {
+		if _, err := os.Stat(defaultPath); err == nil {
+			path = defaultPath
 		}
 	}
 	if path != "" {

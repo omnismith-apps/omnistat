@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	rawLinux  = "b3f1c2d4e5f60718293a4b5c6d7e8f90"
-	rawDarwin = "3C2E7A55-1B9D-4E4F-9F1A-0C2B3D4E5F60"
+	rawLinux   = "b3f1c2d4e5f60718293a4b5c6d7e8f90"
+	rawDarwin  = "3C2E7A55-1B9D-4E4F-9F1A-0C2B3D4E5F60"
+	rawWindows = "5d8f2a1c-7e3b-4c9d-a6f0-1b2c3d4e5f60"
 )
 
 func mod(goos string, fsys fstest.MapFS, out string, runErr error) *machineid.Module {
@@ -145,9 +146,60 @@ func TestDiscover_Darwin(t *testing.T) {
 	}
 }
 
+// Spec 006 FR-002/003: Windows reads the machine GUID and derives it like the
+// other sources; empty, all-zero or unreadable → ErrNoIdentity (002 FR-006).
+func TestDiscover_Windows(t *testing.T) {
+	ctx := context.Background()
+	win := func(guid string, err error) *machineid.Module {
+		m := mod("windows", fstest.MapFS{}, "", nil)
+		m.MachineGUID = func() (string, error) { return guid, err }
+		return m
+	}
+	id, err := win("  "+rawWindows+"\r\n", nil).Discover(ctx, "")
+	if err != nil || id.Source != machineid.SourceWindows || machineid.SourceWindows != "windows-machine-guid" {
+		t.Fatalf("windows: %+v %v", id, err)
+	}
+	if id.Value != machineid.Derive(rawWindows) || len(id.Value) != 64 {
+		t.Fatalf("must be derived exactly like the other sources (ADR-0004): %+v", id)
+	}
+
+	id, err = win(rawWindows, nil).Discover(ctx, "rack7-node3")
+	if err != nil || id.Source != machineid.SourceStatic || id.Value != "rack7-node3" {
+		t.Fatalf("static wins (002 FR-005): %+v %v", id, err)
+	}
+
+	for name, m := range map[string]*machineid.Module{
+		"empty":      win("", nil),
+		"all zero":   win("00000000-0000-0000-0000-000000000000", nil),
+		"unreadable": win("", errors.New("registry: access denied")),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := m.Discover(ctx, "")
+			if !errors.Is(err, machineid.ErrNoIdentity) {
+				t.Fatalf("want ErrNoIdentity, got %v", err)
+			}
+			for _, want := range []string{"MachineGuid", "identity.static", "OMNISTAT_IDENTITY"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error should mention %q: %v", want, err)
+				}
+			}
+		})
+	}
+}
+
+// The raw GUID must never surface, not even in the absent-identity error.
+func TestDiscover_WindowsNeverShowsRaw(t *testing.T) {
+	m := mod("windows", fstest.MapFS{}, "", nil)
+	m.MachineGUID = func() (string, error) { return rawWindows, nil }
+	id, err := m.Discover(context.Background(), "")
+	if err != nil || strings.Contains(id.Value, rawWindows) {
+		t.Fatalf("raw GUID leaked: %+v %v", id, err)
+	}
+}
+
 func TestDiscover_UnsupportedOS(t *testing.T) {
-	_, err := mod("windows", fstest.MapFS{}, "", nil).Discover(context.Background(), "")
-	if !errors.Is(err, machineid.ErrNoIdentity) || !strings.Contains(err.Error(), "windows") {
+	_, err := mod("plan9", fstest.MapFS{}, "", nil).Discover(context.Background(), "")
+	if !errors.Is(err, machineid.ErrNoIdentity) || !strings.Contains(err.Error(), "plan9") {
 		t.Fatalf("%v", err)
 	}
 }
