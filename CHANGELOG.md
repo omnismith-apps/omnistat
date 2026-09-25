@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-25
+
+First release: Linux, macOS and Windows (amd64, arm64).
+
 ### Added
 - omnistat runs on Windows (feature 006, ADR-0010). The host identity comes from Windows' machine GUID, derived like the other sources (`windows-machine-guid`).
 - `omnistat service install` (Windows) installs omnistat as a service:
