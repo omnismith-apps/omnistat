@@ -331,10 +331,10 @@ On the host, upgrade itself only creates and removes a temporary
 - Release channels beyond "latest stable" and "exactly this version".
 - macOS.
 
-## Decisions taken while drafting (for the owner to confirm)
+## Decisions (confirmed by the owner, 2026-09-26)
 
-The owner asked for spec, plan, tasks and implementation in one pass, without
-intermediate approval. These choices were made on the owner's behalf:
+The spec, plan, tasks and implementation were written in one pass, without
+intermediate approval. The owner then confirmed these choices, and ADR-0013:
 
 - **Hand over to the new binary's `service install`** rather than installing the
   download with the running binary's install logic. The new version's unit, sandbox
@@ -354,14 +354,14 @@ intermediate approval. These choices were made on the owner's behalf:
 
 ## Open questions
 
-None. The decisions above are the owner's to revisit.
+None.
 
 ## Implementation notes (2026-09-26)
 
 T001–T050 are done. `make all crosscheck` is green, including golangci-lint for the
 Windows build. What is left: owner acceptance (T051, which needs a published release
 candidate) and the sync that follows it (T052). ADR-0013 is
-*proposed*.
+accepted.
 
 **Container acceptance (NFR-006), 2026-09-26.** `make e2e-upgrade` used the local API and
 the "Omnistat Test" project. Each disposable systemd container installs the published

@@ -17,5 +17,6 @@ Numbered `NNNN-kebab-title.md`; never edit a decision after acceptance — super
 | [0010](0010-windows-is-a-supported-platform.md) | Windows is a supported platform | accepted |
 | [0011](0011-windows-service-security-model.md) | The Windows service's security model | accepted |
 | [0012](0012-linux-service-security-model.md) | The Linux service's security model | accepted |
+| [0013](0013-self-upgrade-trust-model.md) | Where `omnistat upgrade` gets a binary, and what it trusts | accepted |
 
 Start from `../templates/adr.md`.

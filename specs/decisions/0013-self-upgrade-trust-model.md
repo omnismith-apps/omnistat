@@ -1,5 +1,5 @@
 ---
-status: proposed         # proposed | accepted | deprecated | superseded
+status: accepted         # proposed | accepted | deprecated | superseded
 date: 2026-09-26
 deciders: [evgenii, Claude]
 supersedes: null
@@ -68,3 +68,4 @@ authorship:
 - Follow-ups: sign releases in `.github/workflows/release.yml` and verify the signature
   in upgrade before the hand-over. That needs its own spec, and it supersedes point 3 of
   this ADR.
+- Accepted by the owner on 2026-09-26, with spec 009's decisions.

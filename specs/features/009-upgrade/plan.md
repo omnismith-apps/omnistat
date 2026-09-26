@@ -205,7 +205,7 @@ operation is idempotent (NFR-003).
   (ADR-0013). The follow-up is signing.
 
 ## Decisions taken here that deserve an ADR
-- **ADR-0013 (proposed)**: where upgrade gets a binary and what it trusts. That covers
+- **ADR-0013 (accepted 2026-09-26)**: where upgrade gets a binary and what it trusts. That covers
   web URLs over the REST API, checksums without signatures for now, a mirror as trusted
   as GitHub, HTTPS-only, staging next to the installed binary, and handing over to the
   new binary's install.

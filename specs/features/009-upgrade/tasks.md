@@ -99,5 +99,5 @@ host: real systemd work happens only in the disposable container of T050.
   and rocky8.
 - [ ] T051 Owner acceptance on Linux and Windows (NFR-006), with a published release
   candidate. — verify: owner confirms.
-- [ ] T052 Sync: spec → `implemented` with notes and deviations, plan → `done`, ADR-0013
-  accepted by the owner, memory. — verify: `make specs-check`.
+- [ ] T052 Sync: spec → `implemented` with notes and deviations, plan → `done`, memory.
+  *(ADR-0013 and the spec's decisions confirmed by the owner 2026-09-26.)* — verify: `make specs-check`.

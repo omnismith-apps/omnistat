@@ -20,7 +20,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
   - `OMNISTAT_RELEASES_URL` names an HTTPS mirror.
   - The download is unpacked next to the installed binary, never in `/tmp`, so hosts
     with a `noexec` `/tmp` work.
-- Spec 009 (`omnistat upgrade`), ADR-0013 (proposed: what upgrade trusts).
+- Spec 009 (`omnistat upgrade`), ADR-0013 (what upgrade trusts).
 - `make e2e-upgrade`: container acceptance of upgrade (Fedora 44, Debian 12, Rocky 8).
 
 ## [0.3.0] - 2026-09-26
