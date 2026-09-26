@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-26
+
+omnistat upgrades itself.
+
 ### Added
 - `omnistat upgrade` updates the installed service (feature 009, ADR-0013). It needs the
   same rights as install (`sudo` on Linux, an elevated prompt on Windows).

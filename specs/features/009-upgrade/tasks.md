@@ -98,6 +98,7 @@ host: real systemd work happens only in the disposable container of T050.
   `scripts/e2e-upgrade.sh`, `Makefile`) — verify: all checks pass on fedora44, debian12
   and rocky8.
 - [ ] T051 Owner acceptance on Linux and Windows (NFR-006), with a published release
-  candidate. — verify: owner confirms.
+  candidate. — verify: owner confirms. *(Linux done 2026-09-26 with `v0.4.0-rc.1`, from
+  v0.2.0. Windows pending.)*
 - [ ] T052 Sync: spec → `implemented` with notes and deviations, plan → `done`, memory.
   *(ADR-0013 and the spec's decisions confirmed by the owner 2026-09-26.)* — verify: `make specs-check`.

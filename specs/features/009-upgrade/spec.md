@@ -359,9 +359,26 @@ None.
 ## Implementation notes (2026-09-26)
 
 T001–T050 are done. `make all crosscheck` is green, including golangci-lint for the
-Windows build. What is left: owner acceptance (T051, which needs a published release
-candidate) and the sync that follows it (T052). ADR-0013 is
+Windows build. What is left: owner acceptance on Windows (T051; Linux is done, below) and the sync that follows it (T052). ADR-0013 is
 accepted.
+
+**Owner acceptance, Linux (NFR-006), 2026-09-26**, on a remote Linux host running the
+v0.2.0 service, with the published `v0.4.0-rc.1`:
+- `upgrade --dry-run` without `--version` resolved the latest release, v0.3.0, through
+  GitHub's redirects. It verified the download and printed v0.3.0's install plan, then
+  changed nothing.
+- `upgrade --version v0.4.0-rc.1` upgraded from **v0.2.0**, the oldest release with
+  `service`, with no prompt. It kept the stored settings and the config, kept the same
+  entity, and left the service active.
+
+Windows acceptance, including an upgrade run from the installed copy (FR-013a), is
+still to come.
+
+Finding: install and uninstall label distribution-wide drop-ins as "your drop-in", for
+example Fedora's `/usr/lib/systemd/system/service.d/10-timeout-abort.conf`, which
+systemd 246+ lists in `DropInPaths` for every service. This comes from 007 FR-018 and
+FR-021 and affects only the output. It is left for a fix after 0.4.0, so the release
+stays identical to the tested rc.
 
 **Container acceptance (NFR-006), 2026-09-26.** `make e2e-upgrade` used the local API and
 the "Omnistat Test" project. Each disposable systemd container installs the published
