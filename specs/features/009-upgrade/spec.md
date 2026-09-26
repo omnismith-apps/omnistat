@@ -406,6 +406,10 @@ Deviations from the plan, and findings:
   and `summary` prints the result. `scripts/e2e-upgrade.sh` reuses them.
 - **A new dependency, `golang.org/x/net v0.50.0`** (`http/httpproxy` only). It is the
   release matching `x/sys v0.41.0`, so `x/sys` did not move.
+- **The first Windows CI run failed two CLI tests.** They used the systemd fakehost but
+  took the platform from the runner, so on Windows they expected Linux archives and got
+  the Windows zip. The tests now pin `GOOS=linux` with the systemd backend. Production
+  was not affected: that backend exists only on Linux.
 - **Seams**: `App.Runner` and `App.StageDir` (tests), and `installer.Installation` on
   both backends.
 

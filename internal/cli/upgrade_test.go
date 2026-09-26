@@ -98,6 +98,11 @@ func installedSystemd(t *testing.T) *sdfake.Host {
 
 func (c *upgradeCase) run(t *testing.T, app *cli.App, args ...string) run {
 	t.Helper()
+	// The systemd backend exists only on Linux, and the platform picks the
+	// archive: pin it, since these tests run on Windows in CI too.
+	if app.SystemdHost != nil && app.GOOS == "" {
+		app.GOOS = "linux"
+	}
 	app.Registry = registryWithMachineID(fstest.MapFS{})
 	app.Version = "t"
 	app.Runner = c.runner
