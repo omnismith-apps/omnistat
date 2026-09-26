@@ -52,15 +52,17 @@ func Probe() module.Module {
 	}}
 }
 
-// Disk is a fixture that introduces its own template plus one host attribute.
-func Disk() module.Module {
+// Volume is a fixture that introduces its own template plus one host
+// attribute. Like Probe, its name and slugs are unlike any shipped module's
+// (spec 008 renamed it from "disk", which is now a real module).
+func Volume() module.Module {
 	return module.Static{M: manifest.Manifest{
-		Module:    "disk",
-		Templates: []manifest.Template{{Slug: "disk", Name: "Disk", Description: "One per mounted filesystem"}},
+		Module:    "volume",
+		Templates: []manifest.Template{{Slug: "volume", Name: "Volume", Description: "One per mounted filesystem"}},
 		Attributes: []manifest.Attribute{
-			{Key: "mount", Name: "Mount point", Slug: "disk_mount", Kind: manifest.KindText, Template: "disk"},
-			{Key: "used", Name: "Used", Slug: "disk_used_pct", Kind: manifest.KindMetric, Template: "disk"},
-			{Key: "count", Name: "Disk count", Slug: "disk_count", Kind: manifest.KindNumber},
+			{Key: "mount", Name: "Mount point", Slug: "volume_mount", Kind: manifest.KindText, Template: "volume"},
+			{Key: "used", Name: "Used", Slug: "volume_used_pct", Kind: manifest.KindMetric, Template: "volume"},
+			{Key: "count", Name: "Volume count", Slug: "volume_count", Kind: manifest.KindNumber},
 		},
 	}}
 }
@@ -73,11 +75,11 @@ func Ident() module.Module {
 	}}
 }
 
-// Registry returns a registry with Ident (required), Probe (on) and Disk (off by default).
+// Registry returns a registry with Ident (required), Probe (on) and Volume (off by default).
 func Registry() *module.Registry {
 	r := module.NewRegistry()
 	r.Register(Ident(), module.Required())
 	r.Register(Probe())
-	r.Register(Disk(), module.DisabledByDefault())
+	r.Register(Volume(), module.DisabledByDefault())
 	return r
 }

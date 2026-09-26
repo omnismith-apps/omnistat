@@ -123,6 +123,13 @@ func (a *App) Run(ctx context.Context, args []string, stdout, stderr io.Writer, 
 		}
 	}
 	e := env{ctx: ctx, stdout: stdout, stderr: stderr, getenv: getenv, log: a.newLogger(stderr, level, format), config: *cfgPath, defaultConfig: defaultConfig}
+	// Modules log through slog's default (omission records, notices, debug
+	// records). Make it the process logger for this run so that they honour
+	// log.level and log.format and reach the journal or the Event Log
+	// (003 FR-026, amended 2026-09-26).
+	prevLog := slog.Default()
+	slog.SetDefault(e.log)
+	defer slog.SetDefault(prevLog)
 
 	switch rest[0] {
 	case "version":

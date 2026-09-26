@@ -230,6 +230,17 @@ run_distro() {
 	sleep 2
 	out=$(in_c journalctl -u omnistat --no-pager -o json)
 	has "debug level from the config reaches the journal at debug (FR-022)" '"PRIORITY" *: *"7"' "$out"
+
+	# Spec 008 NFR-003/NFR-005: the sandbox (read-only system, hidden homes, private
+	# devices, dynamic user) leaves the disk readings intact: the system volume is
+	# read and at least one disk is counted, and no collection omitted anything.
+	out=$(in_c journalctl -u omnistat --no-pager -o cat)
+	has "disk: volume and disks read inside the sandbox (008 NFR-003)" 'msg="disk read" module=disk path=/ devices=[a-z0-9]' "$out"
+	if grep -q 'msg="observations omitted" module=disk' <<<"$out"; then
+		ko "disk: nothing omitted inside the sandbox (008 NFR-003)" "$(grep 'module=disk' <<<"$out" | tail -5)"
+	else
+		ok "disk: nothing omitted inside the sandbox (008 NFR-003)"
+	fi
 	check "same host entity after the upgrade (US-5/1)" test "$(identity)" = "$id1"
 
 	# US-5/2: --replace-token asks for the token.

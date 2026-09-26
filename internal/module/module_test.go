@@ -22,26 +22,26 @@ func names(mods []module.Module) string {
 // FR-006 / US-4: defaults, switches, unknown names, required modules.
 func TestRegistry_Enabled(t *testing.T) {
 	r := moduletest.Registry()
-	if got := strings.Join(r.Names(), ","); got != "disk,ident,probe" {
+	if got := strings.Join(r.Names(), ","); got != "ident,probe,volume" {
 		t.Fatalf("names: %s", got)
 	}
 	mods, err := r.Enabled(nil)
 	if err != nil || names(mods) != "ident,probe" {
 		t.Fatalf("defaults: %s %v", names(mods), err)
 	}
-	mods, err = r.Enabled(map[string]bool{"disk": true, "probe": false})
-	if err != nil || names(mods) != "ident,disk" {
+	mods, err = r.Enabled(map[string]bool{"volume": true, "probe": false})
+	if err != nil || names(mods) != "ident,volume" {
 		t.Fatalf("switched: %s %v", names(mods), err)
 	}
 	_, err = r.Enabled(map[string]bool{"gpu": true})
-	if err == nil || !strings.Contains(err.Error(), `unknown module "gpu" (known: disk, ident, probe)`) {
+	if err == nil || !strings.Contains(err.Error(), `unknown module "gpu" (known: ident, probe, volume)`) {
 		t.Fatalf("unknown: %v", err)
 	}
 	_, err = r.Enabled(map[string]bool{"ident": false})
 	if err == nil || !strings.Contains(err.Error(), `module "ident" is required`) {
 		t.Fatalf("required: %v", err)
 	}
-	if ms := module.Manifests(mods); len(ms) != 2 || ms[1].Module != "disk" {
+	if ms := module.Manifests(mods); len(ms) != 2 || ms[1].Module != "volume" {
 		t.Fatalf("manifests: %+v", ms)
 	}
 }
@@ -59,7 +59,7 @@ func TestRegistry_DuplicatePanics(t *testing.T) {
 
 // Fixtures must themselves be valid manifests.
 func TestFixturesValidate(t *testing.T) {
-	mods, _ := moduletest.Registry().Enabled(map[string]bool{"disk": true})
+	mods, _ := moduletest.Registry().Enabled(map[string]bool{"volume": true})
 	if err := manifest.Validate(module.Manifests(mods)); err != nil {
 		t.Fatal(err)
 	}

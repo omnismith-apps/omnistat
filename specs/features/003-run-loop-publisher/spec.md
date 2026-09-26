@@ -239,7 +239,12 @@ recognise hosts in Omnismith (the identity is an opaque token, 002 US-4).
 - **FR-026** Every publish MUST log, structurally: number of dimensions and metric
   observations sent, number of requests, duration, and outcome. Every dropped observation
   (FR-002, FR-008, FR-015) MUST be logged with its cause. Values themselves are logged at
-  debug level only. No log line contains the token or the project id.
+  debug level only. No log line contains the token or the project id. What a module
+  logs (omission records, notices, debug records) goes through the same process logger,
+  with its level, format and destination.
+  *(Amended 2026-09-26: module records went through Go's default logger. That logger
+  ignored `log.level` and `log.format`, dropped every debug record, and bypassed the
+  journal's priorities and the Windows Event Log. Found in spec 008, T009.)*
 - **FR-026a** How publishes are logged depends on the mode:
   - **One-shot run:** its publish is logged at info.
   - **Daemon:** a successful publish is logged at debug. At info, the daemon logs:

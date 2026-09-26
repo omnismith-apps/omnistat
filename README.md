@@ -9,8 +9,8 @@ remapped in config to fit an existing schema or marketplace blueprint.
 > Status: **early.** Developed spec-first — see [`specs/README.md`](specs/README.md).
 > Features 001 (schema reconciliation), 002 (host identity), 003 (run loop, publisher,
 > `hostname` module), 004 (`cpu`, the first metric provider), 005 (`memory`), 006
-> (Windows service) and 007 (systemd service) are implemented; the next specs add
-> further value modules (`ip-address`, `disk`, …).
+> (Windows service), 007 (systemd service) and 008 (`disk`) are implemented; the next
+> specs add further value modules (`ip-address`, `net`, …).
 
 ## Why
 
@@ -165,6 +165,7 @@ load average.
 | `hostname` | `hostname` (text) — the entity's human-readable label | 5m |
 | `cpu` | `cpu_usage_pct`, `load_avg_1`, `load_avg_5`, `load_avg_15` (metrics); `cpu_model`, `cpu_cores`, `cpu_arch` (dimensions) | 10s |
 | `memory` | `mem_used_pct`, `mem_available_mib` (metrics); `mem_total_mib` (dimension) | 30s |
+| `disk` | `disk_root_used_pct`, `disk_root_available_gib`, `disk_root_inodes_used_pct`, `disk_read_mibps`, `disk_write_mibps`, `disk_read_iops`, `disk_write_iops`, `disk_busy_pct` (metrics); `disk_root_total_gib` (dimension) | 30s |
 
 CPU usage is the non-idle share of the CPU time that elapsed since the previous reading,
 aggregated across every logical CPU, so a fully busy 8-core host reports 100, not 800,
@@ -178,13 +179,29 @@ its literal "free" figure, which leaves reclaimable cache out and makes a health
 full. `mem_used_pct` is (total − available) ÷ total, so it rises as a host approaches swap
 and compares hosts of any size (two decimal places); amounts are whole MiB, rounded down.
 
+Disk space is reported for the **system volume**: `/` on Linux, the drive holding
+Windows on Windows (not assumed to be `C:`), and the startup disk's data volume on macOS,
+where `/` is a sealed snapshot. `disk_root_used_pct` is used ÷ (used + available), the
+same as `df`, so space reserved for root counts as neither. Amounts are GiB, rounded down
+to two decimals. Disk I/O is counted once, on the **physical disks**: a write through LVM
+on a partition shows up on three devices in `/proc/diskstats`, and omnistat counts only
+the disk. Windows keeps the counters per lettered volume, and those are summed.
+Throughput is in MiB/s and operations per second over the collection interval.
+`disk_busy_pct` is the busiest disk's share of time with I/O in flight: one saturated
+disk is not averaged away. As for CPU usage, a one-shot run measures the rates over a
+short first window. On a filesystem with no inode limit (btrfs), omnistat logs that once
+and publishes no inode figure.
+
 An attribute may declare the platforms it can be collected on. **Load averages are not
 collected on Windows**, which maintains no load average — omnistat says so once at
 startup and publishes nothing for them rather than substituting the nearest available
 number. The attributes are still declared in the project schema everywhere, so a mixed
 fleet converges on one schema. Likewise **macOS publishes only `mem_total_mib`**: it
 maintains no estimate of memory available without swapping, and a figure computed from its
-page counts would overstate the headroom.
+page counts would overstate the headroom. **`disk_busy_pct` and `disk_root_inodes_used_pct` are
+Linux-only**: macOS keeps no busy-time counter, the Windows idle-time counter is not
+among the readings omnistat takes, NTFS has no inode limit, and APFS creates inodes on
+demand.
 
 The host identity is derived from the OS machine id (`/etc/machine-id` on Linux,
 the platform UUID on macOS) as a keyed hash — the raw id is never published. Pin it
@@ -211,6 +228,8 @@ modules:
   memory:
     interval: 30s        # memory's own default
     # enabled: false     # switch a module off: neither its schema nor its values
+  disk:
+    interval: 30s        # disk's own default; the I/O rates are averages over it
 identity:
   static: rack7-node3    # optional: pin the identity instead of autodiscovering it
 http: { timeout: 15s, retries: 3 }

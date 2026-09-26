@@ -47,7 +47,7 @@ func TestVersionAndUsage(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	r = exec(t, nil, "")
-	if r.code != cli.ExitError || !strings.Contains(r.stderr, "Usage:") || !strings.Contains(r.stderr, "disk, ident, probe") {
+	if r.code != cli.ExitError || !strings.Contains(r.stderr, "Usage:") || !strings.Contains(r.stderr, "ident, probe, volume") {
 		t.Fatalf("%+v", r)
 	}
 	r = exec(t, nil, "", "bogus")
@@ -81,8 +81,8 @@ func TestSchema_PlanApplyVerify(t *testing.T) {
 			t.Errorf("plan output lacks %q:\n%s", want, r.stdout)
 		}
 	}
-	if strings.Contains(r.stdout, "disk") {
-		t.Errorf("disk is disabled by default and must not appear:\n%s", r.stdout)
+	if strings.Contains(r.stdout, "volume") {
+		t.Errorf("volume is disabled by default and must not appear:\n%s", r.stdout)
 	}
 	if len(srv.Templates()) != 0 {
 		t.Fatal("plan must not write")
@@ -146,7 +146,7 @@ modules:
   probe:
     attributes:
       usage: { slug: cpu_usage }
-  disk:
+  volume:
     enabled: true
 `
 	r := exec(t, srv, cfg, "schema", "plan")
@@ -156,7 +156,7 @@ modules:
 	if strings.Contains(r.stdout, "cpu_usage") || strings.Contains(r.stdout, "+ template server") {
 		t.Errorf("existing objects must not be planned:\n%s", r.stdout)
 	}
-	for _, want := range []string{"+ template disk", "+ attribute disk_count (number) → server", "+ attribute disk_mount (text) → disk", "+ attribute probe_model (text) → server"} {
+	for _, want := range []string{"+ template volume", "+ attribute volume_count (number) → server", "+ attribute volume_mount (text) → volume", "+ attribute probe_model (text) → server"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("plan lacks %q:\n%s", want, r.stdout)
 		}

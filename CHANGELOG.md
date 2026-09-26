@@ -5,6 +5,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-26
+
+omnistat reports disk space and disk I/O.
+
+### Added
+- The `disk` module (feature 008), on by default and collected every 30s:
+  - **System volume**: `disk_root_used_pct` (as `df` computes it, so the root reserve counts as neither used nor available), `disk_root_available_gib`, and `disk_root_total_gib` (GiB, rounded down to two decimals). On Linux also `disk_root_inodes_used_pct`. The system volume is `/` on Linux, the drive holding Windows on Windows, and the data volume on macOS.
+  - **Physical-disk I/O**: `disk_read_mibps`, `disk_write_mibps`, `disk_read_iops` and `disk_write_iops`, and on Linux `disk_busy_pct` (the busiest disk). Each I/O is counted once, on whole disks: partitions, LVM, RAID and loop devices are not added on top. Windows counts per lettered volume.
+  - A one-shot `omnistat run` publishes real rates, measured over a short window.
+  - On a filesystem with no inode limit (btrfs), inode usage is not published, and a notice is logged once.
+- Spec 008 (the `disk` module).
+
+### Fixed
+- What a module logs (omission records, notices, debug records) now goes through omnistat's configured logger. It used to go to Go's default logger, which ignored `log.level` and `log.format`, dropped debug records, and bypassed the journal's priorities and the Windows Event Log (spec 003 FR-026 amended).
+
 ## [0.2.0] - 2026-09-25
 
 omnistat installs itself as a systemd service on Linux.

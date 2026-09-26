@@ -81,12 +81,12 @@ func TestScheduler_Cadence(t *testing.T) {
 	cpu := &counter{collect: func(context.Context, int32) ([]module.Observation, error) {
 		return []module.Observation{{Key: "usage", Value: 42}}, nil
 	}}
-	disk := &counter{collect: func(context.Context, int32) ([]module.Observation, error) {
+	vol := &counter{collect: func(context.Context, int32) ([]module.Observation, error) {
 		return []module.Observation{{Key: "count", Value: 2}}, nil
 	}}
 	cpuMod := moduletest.WithProvider(moduletest.Probe(), 10*time.Second, cpu.fn)
-	diskMod := moduletest.WithProvider(moduletest.Disk(), 30*time.Second, disk.fn)
-	sources, _, err := collect.Sources(desiredFor(t, cpuMod, diskMod), []module.Module{cpuMod, diskMod}, nil, "linux")
+	volMod := moduletest.WithProvider(moduletest.Volume(), 30*time.Second, vol.fn)
+	sources, _, err := collect.Sources(desiredFor(t, cpuMod, volMod), []module.Module{cpuMod, volMod}, nil, "linux")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,11 +94,11 @@ func TestScheduler_Cadence(t *testing.T) {
 	s, buf, _ := start(t, sources, clock, nil)
 
 	<-s.FirstRound()
-	if cpu.calls.Load() != 1 || disk.calls.Load() != 1 {
-		t.Fatalf("first round: cpu %d disk %d", cpu.calls.Load(), disk.calls.Load())
+	if cpu.calls.Load() != 1 || vol.calls.Load() != 1 {
+		t.Fatalf("first round: cpu %d volume %d", cpu.calls.Load(), vol.calls.Load())
 	}
 	b := buf.Snapshot()
-	if len(b.Dims) != 1 || b.Dims[0].Slug != "disk_count" || b.Dims[0].Value != 2.0 || !b.Dims[0].At.Equal(t0) {
+	if len(b.Dims) != 1 || b.Dims[0].Slug != "volume_count" || b.Dims[0].Value != 2.0 || !b.Dims[0].At.Equal(t0) {
 		t.Fatalf("dims: %+v", b.Dims)
 	}
 	if len(b.Metrics) != 1 || b.Metrics[0].Slug != "probe_usage_pct" || b.Metrics[0].Value != 42.0 || !b.Metrics[0].At.Equal(t0) {
@@ -108,12 +108,12 @@ func TestScheduler_Cadence(t *testing.T) {
 	waitFor(t, "both parked", func() bool { return clock.Sleepers() == 2 })
 	clock.Advance(10 * time.Second)
 	waitFor(t, "cpu 2nd call", func() bool { return cpu.calls.Load() == 2 })
-	if disk.calls.Load() != 1 {
-		t.Fatalf("disk must not have run: %d", disk.calls.Load())
+	if vol.calls.Load() != 1 {
+		t.Fatalf("volume must not have run: %d", vol.calls.Load())
 	}
 	waitFor(t, "cpu parked", func() bool { return clock.Sleepers() == 2 })
 	clock.Advance(20 * time.Second)
-	waitFor(t, "cpu 3rd, disk 2nd", func() bool { return cpu.calls.Load() == 3 && disk.calls.Load() == 2 })
+	waitFor(t, "cpu 3rd, volume 2nd", func() bool { return cpu.calls.Load() == 3 && vol.calls.Load() == 2 })
 	waitFor(t, "parked", func() bool { return clock.Sleepers() == 2 })
 	b = buf.Snapshot()
 	if len(b.Metrics) != 3 || !b.Metrics[2].At.Equal(t0.Add(30*time.Second)) {
@@ -152,7 +152,7 @@ func TestScheduler_FailureIsolation(t *testing.T) {
 		}, nil
 	}}
 	badMod := moduletest.WithProvider(moduletest.Probe(), 10*time.Second, bad.fn)
-	goodMod := moduletest.WithProvider(moduletest.Disk(), 10*time.Second, good.fn)
+	goodMod := moduletest.WithProvider(moduletest.Volume(), 10*time.Second, good.fn)
 	sources, _, _ := collect.Sources(desiredFor(t, badMod, goodMod), []module.Module{badMod, goodMod}, nil, "linux")
 	clock := collect.NewFakeClock(t0)
 	var logw bytes.Buffer
@@ -164,12 +164,12 @@ func TestScheduler_FailureIsolation(t *testing.T) {
 	waitFor(t, "parked", func() bool { return clock.Sleepers() == 2 })
 
 	b := buf.Snapshot()
-	if len(b.Dims) != 1 || b.Dims[0].Slug != "disk_count" || len(b.Metrics) != 0 {
+	if len(b.Dims) != 1 || b.Dims[0].Slug != "volume_count" || len(b.Metrics) != 0 {
 		t.Fatalf("buffer: %+v", b)
 	}
 	logs := logw.String()
 	for _, want := range []string{`collection failed`, `module=probe`, `error=boom`, `provider panicked: kaboom`,
-		`key not declared in manifest`, `key=nope`, `invalid value`, `key=mount`, `module=disk`} {
+		`key not declared in manifest`, `key=nope`, `invalid value`, `key=mount`, `module=volume`} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("log should contain %q:\n%s", want, logs)
 		}
@@ -210,7 +210,7 @@ func TestScheduler_Concurrency(t *testing.T) {
 	}
 	a, b := mk(), mk()
 	am := moduletest.WithProvider(moduletest.Probe(), time.Second, a.fn)
-	bm := moduletest.WithProvider(moduletest.Disk(), time.Second, b.fn)
+	bm := moduletest.WithProvider(moduletest.Volume(), time.Second, b.fn)
 	sources, _, _ := collect.Sources(desiredFor(t, am, bm), []module.Module{am, bm}, nil, "linux")
 	clock := collect.NewFakeClock(t0)
 	before := runtime.NumGoroutine()
@@ -226,7 +226,7 @@ func TestScheduler_Concurrency(t *testing.T) {
 
 // FR-018: Once runs every source once and names the failures.
 func TestOnce(t *testing.T) {
-	ok := moduletest.WithProvider(moduletest.Disk(), time.Minute, func(context.Context) ([]module.Observation, error) {
+	ok := moduletest.WithProvider(moduletest.Volume(), time.Minute, func(context.Context) ([]module.Observation, error) {
 		return []module.Observation{{Key: "count", Value: 3}}, nil
 	})
 	bad := moduletest.WithProvider(moduletest.Probe(), time.Minute, func(context.Context) ([]module.Observation, error) {

@@ -112,6 +112,47 @@ not re-derive them. gopsutil v4.26.8, `mem.VirtualMemoryWithContext`:
 - The SDK decodes `GetEntityChart` values as **`float32`** (about 7 significant digits).
   Whole-MiB values are exact up to 2²⁴ MiB (16 TiB). Byte-scale values would not be.
 
+## Host readings: disk (feature 008 spike, 2026-09-26)
+
+gopsutil v4.26.8, `disk.UsageWithContext` and `disk.IOCountersWithContext`.
+
+- **Linux `Usage("/")`** is one `statfs` per call: `Total` = `f_blocks·bsize`, `Used` =
+  `(f_blocks − f_bfree)·bsize`, `Free` = `f_bavail·bsize` (available to unprivileged
+  users). Byte-for-byte equal to `df -B1 /` on the spike host, and `Used ÷ (Used + Free)`
+  equals `df`'s Use% (60.49% → `df` 61%). On **btrfs** `InodesTotal` = `InodesFree` = 0,
+  which is what `df -i` shows too (`0 0 0 -`).
+- **Linux `IOCounters()`** returns every `/proc/diskstats` line that is not all zeros:
+  whole disks **and** their partitions (and `dm-*`, `md*`, `loop*`, `zram*` where they
+  exist). On the spike host `nvme1n1p3` carried 99.8% of `nvme1n1`'s bytes: partition
+  and disk count the same I/O, so summing all lines double-counts. Classification by
+  `/sys/block/<name>` (absent = partition) and `/sys/block/<name>/device` (absent =
+  virtual) put both NVMe disks in "disk" and all seven partitions in "partition". Bytes
+  are sectors × 512, `IoTime` is field 13 (ms with I/O in flight). The values matched
+  `/proc/diskstats` read a moment later.
+- **Cost**: the first `Usage` + `IOCounters` took about 0.93ms; 20 repeats took
+  0.23–0.41ms. `IOCounters` also reads `/run/udev/data/b<maj>:<min>` per device for the
+  serial number and label, which is unused. No goroutine is started (1 before, 1 after).
+- **macOS** (read, not run): `Usage` is the same `statfs` code. `IOCounters` matches
+  **whole** `IOMedia` objects whose parent is an `IOBlockStorageDriver`, which means
+  physical disks. APFS synthesized disks sit under a container scheme instead, so they
+  are not returned and nothing is double-counted. `IoTime` is gopsutil's
+  `ReadTime + WriteTime`, not an OS counter. IOKit and CoreFoundation are opened once per
+  process (`sync.Once`), and a failed open is returned on every later call.
+- **Windows** (read, not run): `Usage` is `GetDiskFreeSpaceExW`, with `Free` =
+  `TotalNumberOfFreeBytes` (quota-unaware). `IOCounters` walks the **drive letters**,
+  keeps `DRIVE_FIXED` ones, opens `\\.\X:` with zero access and issues
+  `IOCTL_DISK_PERFORMANCE`. It silently skips volumes that do not support it (counters
+  disabled), and fails the **whole call** if any open fails with an error other than
+  "not found". `ReadCount`/`WriteCount` are 32-bit; `IdleTime` is dropped and `IoTime`
+  is never set.
+- All six `make crosscheck` targets build with `CGO_ENABLED=0` (macOS uses purego).
+- **Read-back precision (sandbox, 2026-09-26).** `disk_root_available_gib` sent as
+  `365.73` reads back through `GetEntityChart` as `365.7300109863281` (float32). A test
+  that checks "two decimals" with a fixed tolerance on `v×100` breaks once values reach
+  the hundreds. Compare in float32 instead: `float32(v) == float32(round2(v))`.
+  Dimension read-backs (`EntityValues`) return the exact string that was sent
+  (`"929.92"`).
+
 ## Writes are processed asynchronously — never assume read-your-writes
 
 **The platform processes writes asynchronously**, entity creation included. A write is
