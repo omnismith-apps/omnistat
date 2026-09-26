@@ -9,8 +9,8 @@ remapped in config to fit an existing schema or marketplace blueprint.
 > Status: **early.** Developed spec-first — see [`specs/README.md`](specs/README.md).
 > Features 001 (schema reconciliation), 002 (host identity), 003 (run loop, publisher,
 > `hostname` module), 004 (`cpu`, the first metric provider), 005 (`memory`), 006
-> (Windows service), 007 (systemd service) and 008 (`disk`) are implemented; the next
-> specs add further value modules (`ip-address`, `net`, …).
+> (Windows service), 007 (systemd service), 008 (`disk`) and 010 (`net`) are
+> implemented; the next specs add further value modules (`ip-address`, …).
 
 ## Why
 
@@ -204,6 +204,7 @@ On Windows, in an elevated PowerShell:
 | `cpu` | `cpu_usage_pct`, `load_avg_1`, `load_avg_5`, `load_avg_15` (metrics); `cpu_model`, `cpu_cores`, `cpu_arch` (dimensions) | 10s |
 | `memory` | `mem_used_pct`, `mem_available_mib` (metrics); `mem_total_mib` (dimension) | 30s |
 | `disk` | `disk_root_used_pct`, `disk_root_available_gib`, `disk_root_inodes_used_pct`, `disk_read_mibps`, `disk_write_mibps`, `disk_read_iops`, `disk_write_iops`, `disk_busy_pct` (metrics); `disk_root_total_gib` (dimension) | 30s |
+| `net` | `net_rx_mbps`, `net_tx_mbps`, `net_rx_pps`, `net_tx_pps`, `net_rx_errors_ps`, `net_tx_errors_ps`, `net_rx_drops_ps`, `net_tx_drops_ps`, `net_tcp_established`, `net_tcp_retrans_pct`, `net_tcp_resets_ps`, `net_tcp_listen_drops_ps`, `net_tcp_time_wait`, `net_udp_errors_ps`, `net_conntrack_used_pct` (metrics) | 30s |
 
 CPU usage is the non-idle share of the CPU time that elapsed since the previous reading,
 aggregated across every logical CPU, so a fully busy 8-core host reports 100, not 800,
@@ -230,6 +231,19 @@ disk is not averaged away. As for CPU usage, a one-shot run measures the rates o
 short first window. On a filesystem with no inode limit (btrfs), omnistat logs that once
 and publishes no inode figure.
 
+Network traffic is counted once, on the **physical interfaces**: NICs, including the
+virtual NICs a hypervisor gives a VM. Loopback, bridges, veths, bonds, VLANs and tunnels
+are left out, because what they carry is either counted on a NIC too or never leaves the
+host. A container download therefore counts once, not three times. Bond members are
+counted and the bond is not. Throughput is in **bits** per second with decimal prefixes
+(`net_rx_mbps` = 10⁶ bit/s), as link speeds are quoted. Packets, errors and drops are per
+second, per direction. `net_tcp_retrans_pct` is retransmitted segments ÷ all segments sent
+(retransmissions included); an idle host sends few segments, so treat a high share
+without traffic with care. In a container that sees only a veth, omnistat logs once that
+there is no physical interface and publishes no interface values; the TCP values are the
+container's own. `net_conntrack_used_pct` is the connection-tracking table's fill against
+`nf_conntrack_max`; where tracking is not loaded, omnistat says so once.
+
 An attribute may declare the platforms it can be collected on. **Load averages are not
 collected on Windows**, which maintains no load average — omnistat says so once at
 startup and publishes nothing for them rather than substituting the nearest available
@@ -239,7 +253,9 @@ maintains no estimate of memory available without swapping, and a figure compute
 page counts would overstate the headroom. **`disk_busy_pct` and `disk_root_inodes_used_pct` are
 Linux-only**: macOS keeps no busy-time counter, the Windows idle-time counter is not
 among the readings omnistat takes, NTFS has no inode limit, and APFS creates inodes on
-demand.
+demand. **`net_tcp_listen_drops_ps`, `net_tcp_time_wait` and `net_conntrack_used_pct` are
+Linux-only**, and **macOS collects no `net` value**: gopsutil reads its interface counters
+by running `netstat`, which omnistat never does.
 
 The host identity is derived from the OS machine id (`/etc/machine-id` on Linux,
 the platform UUID on macOS) as a keyed hash — the raw id is never published. Pin it
@@ -268,6 +284,8 @@ modules:
     # enabled: false     # switch a module off: neither its schema nor its values
   disk:
     interval: 30s        # disk's own default; the I/O rates are averages over it
+  net:
+    interval: 30s        # net's own default; the rates are averages over it
 identity:
   static: rack7-node3    # optional: pin the identity instead of autodiscovering it
 http: { timeout: 15s, retries: 3 }

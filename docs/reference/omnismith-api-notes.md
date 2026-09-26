@@ -153,6 +153,49 @@ gopsutil v4.26.8, `disk.UsageWithContext` and `disk.IOCountersWithContext`.
   Dimension read-backs (`EntityValues`) return the exact string that was sent
   (`"929.92"`).
 
+## Host readings: network (feature 010 spike, 2026-09-26)
+
+gopsutil v4.26.8 `net.IOCountersWithContext(ctx, true)` and
+`net.ProtoCountersWithContext(ctx, {"tcp","udp"})` on Linux, plus direct reads.
+
+- **Linux interfaces.** `IOCounters` is `/proc/net/dev`, every interface in the
+  namespace. The spike host listed 22: `lo`, `wlo1`, 4 bridges, 15 veths and `wg1`. Only
+  `wlo1` has `/sys/class/net/<if>/device`, so the classification rule marks exactly it
+  physical. Its bytes, packets and drops equal `ip -s link` read a moment later
+  (`drop` = `rx_dropped + rx_missed_errors`). The veths together carry about 4 GB that
+  `wlo1` also carried, so summing all interfaces would have multiplied the host's
+  traffic.
+- **Linux TCP/UDP.** `ProtoCounters` is `/proc/net/snmp`. `Tcp:` values equal `nstat -az`
+  (`TcpOutSegs`, `TcpRetransSegs`, `TcpOutRsts`). `/proc/net/snmp6` has **no** `Tcp6`
+  lines: the TCP MIB is shared by IPv4 and IPv6. `Udp:` is IPv4 only; IPv6 is
+  `Udp6InErrors` in `snmp6`. `CurrEstab` sits on the same `Tcp:` line.
+  `nstat` does not print it, because it is a gauge.
+- **Retransmissions are not in `OutSegs`** on Linux (`__tcp_transmit_skb` counts only
+  segments past `snd_nxt` or with no data) nor on Windows (`MIB_TCPSTATS2.dw64OutSegs`
+  "does not include retransmitted segments"). The share is `Δretrans ÷ (Δout + Δretrans)`.
+- **Listen drops.** `/proc/net/netstat` `TcpExt: ListenDrops` went from 0 to 36 (and
+  `ListenOverflows` with it) after 20 non-blocking connects to a backlog-1 listener
+  that never accepted.
+- **TIME_WAIT.** `/proc/net/sockstat` `TCP: … tw N` rose by exactly 10 after 10
+  active closes of IPv6 connections: the count covers both IP versions.
+- **Connection tracking.** `/proc/sys/net/netfilter/nf_conntrack_{count,max}` readable
+  unprivileged (232 / 262144 on the spike host).
+- **Cost.** One full reading (all of the above, 22 interfaces with a `device` stat
+  each) took 0.85–2.0ms. No goroutine is started (1 before, 1 after).
+- **Windows** (read, not run). gopsutil's `IOCounters` fills packets from
+  `InUcastPkts`/`OutUcastPkts` only and walks Go's `net.Interfaces()`, and
+  `ProtoCounters` returns "not implemented", so omnistat calls `iphlpapi` itself.
+  `MIB_IF_ROW2` (`x/sys/windows.MibIfRow2`): `InterfaceAndOperStatusFlags` bit 0 =
+  `HardwareInterface`, bit 1 = `FilterInterface`, bit 2 = `ConnectorPresent`. Every
+  counter is 64-bit, and packets are `Ucast + NUcast`. `GetTcpStatisticsEx2` (64-bit
+  in/out segments; Windows 10 1709, Server 2016) keeps `dwRetransSegs`, `dwOutRsts` and
+  `dwCurrEstab` 32-bit. `x/sys/windows` v0.41.0 wraps neither `GetIfTable2` nor the TCP
+  and UDP statistics calls.
+- **macOS** (read, not run). gopsutil's `IOCounters` runs `netstat -ibdnW` (and
+  `ifconfig -l`), which the no-external-command rule forbids; `ProtoCounters` returns
+  "not implemented". Nothing is read there (spec 010 FR-018).
+- All six `make crosscheck` targets built the spike with `CGO_ENABLED=0`.
+
 ## Writes are processed asynchronously — never assume read-your-writes
 
 **The platform processes writes asynchronously**, entity creation included. A write is

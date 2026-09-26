@@ -2,6 +2,7 @@ package hostread_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"runtime"
 	"testing"
@@ -25,6 +26,11 @@ func TestReads_StartNoGoroutines(t *testing.T) {
 		_, _ = hostread.CPU{}.Model(ctx)
 		_, _ = hostread.Disk{}.Usage(ctx, rootPath())
 		_, _ = hostread.Disk{}.Counters(ctx)
+		_, _ = hostread.Net{}.Interfaces(ctx)
+		_, _ = hostread.Net{}.Stack(ctx)
+		_, _ = hostread.Net{}.ListenDrops(ctx)
+		_, _ = hostread.Net{}.TimeWait(ctx)
+		_, _ = hostread.Net{}.Conntrack(ctx)
 		if runtime.GOOS != "windows" { // spec 004 FR-018: never called there
 			_, _ = hostread.CPU{}.LoadAvg(ctx)
 		}
@@ -113,4 +119,79 @@ func TestDisk_Counters(t *testing.T) {
 		t.Logf("%-12s kind=%v read=%d written=%d busy=%dms", c.Name, c.Kind, c.ReadBytes, c.WriteBytes, c.BusyMillis)
 	}
 	t.Logf("one reading took %v", took)
+}
+
+// netSupported is where spec 010 reads the network at all (FR-018).
+func netSupported() bool { return runtime.GOOS == "linux" || runtime.GOOS == "windows" }
+
+// spec 010 FR-005, NFR-001: the interfaces are readable, classified and cheap.
+func TestNet_Interfaces(t *testing.T) {
+	start := time.Now()
+	ifs, err := hostread.Net{}.Interfaces(context.Background())
+	took := time.Since(start)
+	if !netSupported() {
+		if !errors.Is(err, errors.ErrUnsupported) {
+			t.Fatalf("want ErrUnsupported, got %v", err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("interfaces: %v", err)
+	}
+	for i, c := range ifs {
+		if c.ID == "" || c.Name == "" {
+			t.Errorf("interface %d has no id or name: %+v", i, c)
+		}
+		if i > 0 && ifs[i-1].ID >= c.ID {
+			t.Errorf("not sorted by id: %q before %q", ifs[i-1].ID, c.ID)
+		}
+		t.Logf("%-16s id=%s physical=%v rx=%d tx=%d", c.Name, c.ID, c.Physical, c.RxBytes, c.TxBytes)
+	}
+	t.Logf("one reading took %v", took)
+}
+
+// spec 010 FR-010, FR-011, FR-013: the TCP/UDP counters are readable.
+func TestNet_Stack(t *testing.T) {
+	ctx := context.Background()
+	s, err := hostread.Net{}.Stack(ctx)
+	if !netSupported() {
+		if !errors.Is(err, errors.ErrUnsupported) {
+			t.Fatalf("want ErrUnsupported, got %v", err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("stack: %v", err)
+	}
+	t.Logf("stack: %+v", s)
+	if runtime.GOOS != "linux" {
+		return
+	}
+	if _, err := (hostread.Net{}).ListenDrops(ctx); err != nil {
+		t.Errorf("listen drops: %v", err)
+	}
+	if _, err := (hostread.Net{}).TimeWait(ctx); err != nil {
+		t.Errorf("time wait: %v", err)
+	}
+}
+
+// spec 010 FR-014: connection tracking reads, or says it is not loaded; off
+// Linux it is unsupported.
+func TestNet_Conntrack(t *testing.T) {
+	c, err := hostread.Net{}.Conntrack(context.Background())
+	switch {
+	case runtime.GOOS != "linux":
+		if !errors.Is(err, errors.ErrUnsupported) {
+			t.Fatalf("want ErrUnsupported, got %v", err)
+		}
+	case errors.Is(err, hostread.ErrNoConntrack):
+		t.Log("connection tracking not loaded here")
+	case err != nil:
+		t.Fatalf("conntrack: %v", err)
+	default:
+		if c.Max == 0 {
+			t.Fatalf("loaded but max is zero: %+v", c)
+		}
+		t.Logf("conntrack %d/%d", c.Count, c.Max)
+	}
 }

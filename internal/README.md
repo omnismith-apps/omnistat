@@ -13,7 +13,8 @@ justifies them against a requirement ID (constitution VI).
 | `module/cpu` | First metric provider: usage rate, load averages, CPU dimensions | 004, 005 |
 | `module/memory` | Memory used %, available and total; stateless, macOS total-only | 005 |
 | `module/disk` | System volume space and inodes; physical-disk I/O rates, busiest disk | 008 |
-| `hostread` | Stateless per-area host readers (CPU, memory, disk, with Linux device classification); the only package importing gopsutil (ADR-0009) | 005, 008 |
+| `module/network` | The `net` module: physical-interface traffic, packet, error and drop rates; TCP/UDP health; connection-tracking use | 010 |
+| `hostread` | Stateless per-area host readers (CPU, memory, disk, network, with Linux device and interface classification; Windows IP Helper calls); the only package importing gopsutil (ADR-0009) | 005, 008, 010 |
 | `module/moduletest` | Fixture modules (`probe`, `volume`, `ident`: names no real module uses) and scripted providers for tests | 001, 003, 008 |
 | `identity` | Find-or-create of the host entity | 002 |
 | `collect` | Validation, stamping, bounded buffer, scheduler, one-shot collection, per-platform gating (pure, injected clock) | 003, 004 |

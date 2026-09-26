@@ -1,8 +1,8 @@
 // Package hostread is omnistat's one source of host readings (ADR-0008,
 // ADR-0009) and the only package in the repository that imports gopsutil.
 //
-// It exposes one small reader type per area (CPU, Memory, Disk). Each returns what
-// the operating system reports, as plain structs; what a reading *means* —
+// It exposes one small reader type per area (CPU, Memory, Disk, Net). Each
+// returns what the operating system reports, as plain structs; what a reading *means* —
 // which CPU states are idle, how memory is rounded, what is published — is the
 // consuming module's decision, made behind a Reader interface that module
 // declares and owns, so its tests never touch this package.
@@ -24,4 +24,13 @@
 // a failed open is returned by every later call that needs them. And on Linux
 // Disk.Counters also reads /sys/block, outside gopsutil, to classify devices
 // (spec 008 FR-011, ADR-0009's follow-up).
+//
+// Net is the area where gopsutil helps least (spec 010). On Linux it uses
+// gopsutil for /proc/net/dev and /proc/net/snmp, and reads /sys/class/net
+// (classification), /proc/net/snmp6, /proc/net/netstat, /proc/net/sockstat
+// and the netfilter sysctls itself, because gopsutil does not expose them. On
+// Windows it calls the IP Helper API directly: gopsutil counts unicast packets
+// only there, cannot classify interfaces, and has no protocol counters. The
+// DLL is loaded once per process, a handle like macOS's. On macOS nothing is
+// read, because gopsutil runs `netstat` there.
 package hostread

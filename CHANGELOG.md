@@ -5,6 +5,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-27
+
+omnistat reports the network.
+
+### Added
+- The `net` module (feature 010): how much traffic the host moves, and whether its
+  network stack is healthy. Fifteen metrics on the host entity, collected every 30s:
+  - traffic of the **physical interfaces** only: receive and transmit throughput in
+    Mbit/s (decimal), packets, errors and drops per second, each direction on its own.
+    Loopback, bridges, veths, bonds, VLANs and tunnels are left out, so a container's
+    traffic is counted once, on the NIC;
+  - TCP: established connections, retransmitted share of segments sent, resets sent
+    per second; on Linux also listen-queue drops per second and TIME_WAIT sockets;
+  - UDP receive errors per second;
+  - on Linux, the connection-tracking table's use against its limit.
+  Linux and Windows. macOS collects no `net` value. A container with no physical
+  interface, or a host without connection tracking, says so once in the log.
+- Spec 010 (`net` module).
+
 ## [0.4.0] - 2026-09-26
 
 omnistat upgrades itself.

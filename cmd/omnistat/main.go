@@ -20,6 +20,7 @@ import (
 	"github.com/omnismith-apps/omnistat/internal/module/hostname"
 	"github.com/omnismith-apps/omnistat/internal/module/machineid"
 	"github.com/omnismith-apps/omnistat/internal/module/memory"
+	"github.com/omnismith-apps/omnistat/internal/module/network"
 	"github.com/omnismith-apps/omnistat/internal/systemd"
 	"github.com/omnismith-apps/omnistat/internal/winsvc"
 )
@@ -65,6 +66,7 @@ func registry() *module.Registry {
 	r.Register(cpu.New())                          // spec 004 FR-002
 	r.Register(memory.New())                       // spec 005 FR-002
 	r.Register(disk.New())                         // spec 008 FR-002
+	r.Register(network.New())                      // spec 010 FR-002
 	return r
 }
 

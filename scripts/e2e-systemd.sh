@@ -248,6 +248,20 @@ run_distro() {
 	else
 		ok "disk: nothing omitted inside the sandbox (008 NFR-003)"
 	fi
+
+	# Spec 010 NFR-003/NFR-005, FR-009: the sandbox (no netlink, private users,
+	# read-only /proc/sys) leaves the network readings intact. A bridged
+	# container sees only a veth, so no interface is counted: that is said once
+	# by the running process, and nothing is omitted.
+	has "net: read inside the sandbox (010 NFR-003)" 'msg="net read" module=net' "$out"
+	has "net: TCP values collected inside the sandbox (010 NFR-003)" 'msg=collected module=net observations=[1-9]' "$out"
+	if grep -q 'msg="observations omitted" module=net' <<<"$out"; then
+		ko "net: nothing omitted inside the sandbox (010 NFR-003)" "$(grep 'module=net' <<<"$out" | tail -5)"
+	else
+		ok "net: nothing omitted inside the sandbox (010 NFR-003)"
+	fi
+	n=$(in_c journalctl -u omnistat "_PID=$pid" --no-pager -o cat | grep -c 'no physical network interface' || true)
+	check "net: no physical interface in a bridged container, said once (010 FR-009)" test "$n" = 1
 	check "same host entity after the upgrade (US-5/1)" test "$(identity)" = "$id1"
 
 	# US-5/2: --replace-token asks for the token.
