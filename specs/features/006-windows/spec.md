@@ -433,32 +433,32 @@ Windows build too.
 (Windows with a Russian UI; 2 × Xeon E5645, 24 logical CPUs, 16 GiB), against a dedicated
 production project, from `v0.1.0-rc.1`. The owner confirmed it as a whole. Recorded:
 
-- **Step 1:** identity `windows-machine-guid`, stable throughout. The `load_avg_*`
+- **Console commands:** identity `windows-machine-guid`, stable throughout. The `load_avg_*`
   attributes were skipped once each. The readings were consistent: 24 cores,
   16374 MiB total, 49.31% used, 8299 MiB available. The dry-run's `cpu_arch` error was
   a 003 bug (below).
-- **Step 2:** closing the console window stopped the publishing. Whether the final
+- **Console daemon:** closing the console window stopped the publishing. Whether the final
   publish landed before Windows ended the process was not established; the spec accepts
   that loss.
-- **Steps 3–5:**
+- **Elevation, dry-run and install:**
   - refused without elevation (exit 1);
   - dry-run identical to the real install, with no token shown and nothing installed;
   - installed and running, with Event Log entries and data arriving.
-- **Step 6:** `sc qc` showed `AUTO_START (DELAYED)`, the quoted binary with
+- **Registration:** `sc qc` showed `AUTO_START (DELAYED)`, the quoted binary with
   `run --daemon`, and `NT SERVICE\omnistat`. `qfailure` showed three 60000 ms restarts
   with an 86400 s reset, and `qfailureflag` was TRUE. The stored setting names were
   `OMNISMITH_ACCESS_TOKEN` and `OMNISMITH_PROJECT_ID`. The config directory had SYSTEM,
   Administrators and Authenticated Users.
-- **Step 7 (FR-015, NFR-001):** as the standard user `omnistd`:
+- **Standard user (FR-015, NFR-001):** as the standard user `omnistd`:
   - `reg query` on the service key was **denied**;
   - `sc qc` worked;
   - writing `omnistat.yaml` and creating a file in the config directory were **denied**;
   - replacing the installed binary was **denied**.
-- **Steps 8–14:** confirmed: values, Event Viewer, stop (0.5 s, clean, no restart
+- **Runtime:** confirmed: values, Event Viewer, stop (0.5 s, clean, no restart
   after a deliberate stop), crash restart, revoked token, token rotation and reboot. The
   Application log is readable by every local user, as Windows intends; omnistat logs no
   secrets (FR-016).
-- **Steps 15–16:** upgrade confirmed. Uninstall stopped the service, whose final publish
+- **Upgrade and uninstall:** upgrade confirmed. Uninstall stopped the service, whose final publish
   and summary were logged, and removed it. The in-use binary was reported as removed at
   the next restart; the owner could not reboot to see it go. That report exposed the
   FR-020 bug below.
@@ -470,14 +470,12 @@ Found in acceptance and fixed after it:
   have lost its fresh binary at boot. Now the running binary is moved to
   `%SystemRoot%\Temp` (or, failing that, renamed next to itself). The program directory
   is removed at once, and only the moved file is deleted at restart. The owner verified
-  this fix on Windows on 2026-09-25, in the run that also accepted spec 007's amendments
-  (runbook steps 16 and 17).
+  this fix on Windows on 2026-09-25, in the run that also accepted spec 007's amendments.
 - **Service key ACL shows `ALL APPLICATION PACKAGES` (read)** next to SYSTEM and
   Administrators, although install writes a protected SYSTEM/Administrators-only DACL.
   It is not a gap. An AppContainer process needs its user **and** its package granted,
-  and no user other than SYSTEM or an administrator is granted, which step 7 confirmed.
-  Where the entries come from was not established. The runbook now expects them.
-- **Runbook:** `New-Item` needs `-ItemType File` on the owner's PowerShell version.
+  and no user other than SYSTEM or an administrator is granted, which the standard-user checks confirmed.
+  Where the entries come from was not established.
 
 Deviations from the plan:
 
@@ -503,11 +501,11 @@ Deviations from the plan:
     skips `_windows.go` files.
   - `scripts/release-notes.sh` lets a pre-release tag use the *Unreleased* section, so the
     acceptance build can be a published `-rc` without a changelog edit.
-- **Found in acceptance step 1 (not Windows-specific):** `run --dry-run` on an empty
+- **Found in acceptance, console commands (not Windows-specific):** `run --dry-run` on an empty
   project logged `observation dropped` for `cpu_arch`, because the option the plan would
   create had no item id yet. Fixed in spec 003 (FR-021 amended), shipping in
   `v0.1.0-rc.2`. The real run was never affected.
-- **Found in acceptance step 5 (owner feedback):** one `published` info line per minute
+- **Found in acceptance, after install (owner feedback):** one `published` info line per minute
   crowded the Windows Application log. Spec 003 gained FR-026a: in daemon mode, publishes
   are logged at debug, with the first publish, recoveries and a `publish summary` every
   `log.summary_interval` (default 15m, `0` = old behaviour) at info. Ships in

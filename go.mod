@@ -6,6 +6,7 @@ require (
 	github.com/goccy/go-yaml v1.19.2
 	github.com/omnismith-sdk/go v1.0.15
 	github.com/shirou/gopsutil/v4 v4.26.8
+	golang.org/x/net v0.50.0
 	golang.org/x/sys v0.41.0
 )
 
@@ -17,5 +18,6 @@ require (
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
+	golang.org/x/text v0.34.0 // indirect
 	gopkg.in/validator.v2 v2.0.1 // indirect
 )

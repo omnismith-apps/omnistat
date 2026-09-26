@@ -398,10 +398,10 @@ None.
 
 Implemented per `plan.md`; `tasks.md` T001–T016 done.
 
-**Owner acceptance, 2026-09-26.** The owner ran `acceptance.md` and confirmed it as a
-whole. No per-step table was returned:
-- part A on their Fedora workstation (against `df`, `iostat`, and as the 007 service);
-- part B on their Windows VM (as the 006 service).
+**Owner acceptance, 2026-09-26.** The owner accepted the feature as a whole. No
+per-step results were returned:
+- on their Fedora workstation (against `df`, `iostat`, and as the 007 service);
+- on their Windows VM (as the 006 service).
 
 Because the owner reported no failure, the Windows virtual-account risk of the plan
 (opening `\\.\C:` for the I/O counters) did not occur, and no fallback reader was
@@ -434,7 +434,7 @@ Deviations, surprises and gaps:
   `make sandbox` runs it as `TestSandbox_Disk`.
 - **Dry run on the dev host**: 929.92 / 365.71 GiB and 60.50%, against `df`'s 61%.
   During a 3 GiB direct write the first-collect rates were non-zero (55 MiB/s,
-  busy 13%). Their agreement with `iostat` is step A4 of the owner runbook.
+  busy 13%). Their agreement with `iostat` was checked in owner acceptance.
 - **Service sandbox (NFR-003)**: `make e2e-systemd` gained two checks: the journal holds
   `disk read … path=/ devices=…` with at least one disk, and no `disk` omission record.
   Both passed on all five distros (Fedora 44, Debian 12, Ubuntu 24.04, Rocky 9, Rocky 8;
@@ -445,7 +445,7 @@ Deviations, surprises and gaps:
 - **Verified only by the owner's run, confirmed as a whole**: Windows as the 006 service
   account, rate accuracy against `iostat` and `Get-Counter`, and the Linux service on a
   real host. The inode percentage on ext4/XFS is not recorded as verified: the dev host
-  is btrfs and step A3's ext4/XFS half was optional. That value rests on unit tests.
+  is btrfs and the ext4/XFS check was optional. That value rests on unit tests.
 - **Not verified at all: macOS.** The data-volume choice, the IOKit disk set and the
   gating are covered only by faked-`Reader` unit tests and the six-target
   `make crosscheck`.

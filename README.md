@@ -97,7 +97,7 @@ ready, so a start with a bad token fails visibly.
 | Task | How |
 |------|-----|
 | Configure | edit `/etc/omnistat/omnistat.yaml`, check it with `omnistat --config /etc/omnistat/omnistat.yaml schema plan`, then `sudo systemctl restart omnistat` |
-| Upgrade | run `sudo ./omnistat service install` from the new version: binary and unit are replaced, settings and config are kept |
+| Upgrade | `sudo /usr/local/bin/omnistat upgrade` (see [Upgrading](#upgrading)): binary and unit are replaced, settings and config are kept |
 | Rotate the token | `sudo /usr/local/bin/omnistat service install --replace-token` |
 | Change the proxy | `sudo HTTPS_PROXY=http://proxy:3128 /usr/local/bin/omnistat service install` (other settings are kept) |
 | Local unit changes | `sudo systemctl edit omnistat` — install rewrites the unit but never touches drop-ins |
@@ -146,7 +146,7 @@ saves typed commands to its history file. For a scripted install the variable wo
 | Task | How |
 |------|-----|
 | Configure | `C:\ProgramData\omnistat\omnistat.yaml` (only administrators can edit it), then restart the service |
-| Upgrade | run `service install` from the new version: the binary is replaced, settings are kept |
+| Upgrade | `& "C:\Program Files\omnistat\omnistat.exe" upgrade` (see [Upgrading](#upgrading)): the binary is replaced, settings are kept |
 | Rotate the token | `service install --replace-token` |
 | Change the proxy | set `$env:HTTPS_PROXY`, then `service install` |
 | Start / stop | Services, `Start-Service omnistat`, `Stop-Service omnistat` (a stop publishes what is buffered first) |
@@ -156,6 +156,44 @@ saves typed commands to its history file. For a scripted install the variable wo
 The binary is not code-signed yet, so SmartScreen may warn when you first run the
 downloaded `omnistat.exe`. On Windows, `load_avg_*` is not collected: Windows has no
 load average.
+
+### Upgrading
+
+`omnistat upgrade` brings the installed service to the latest release (spec 009). It
+downloads the archive for this host from
+[Releases](https://github.com/omnismith-apps/omnistat/releases), checks it against
+`checksums.txt` and checks that the binary runs. It then hands over to the new binary's
+own `service install`, which replaces the binary and the unit or registration, keeps the
+stored settings and your config, and restarts the service. Nothing changes until the
+download is verified. It needs the same rights as install: `sudo`, or an elevated
+prompt.
+
+```bash
+sudo /usr/local/bin/omnistat upgrade --check     # exit 0 up to date, 2 upgrade available, 1 error; changes nothing
+sudo /usr/local/bin/omnistat upgrade --dry-run   # download, verify, and show what the new install would change
+sudo /usr/local/bin/omnistat upgrade             # upgrade to the latest release
+sudo /usr/local/bin/omnistat upgrade --version v0.3.0   # exactly this release: a pre-release, or a rollback
+```
+
+On Windows, in an elevated PowerShell:
+`& "C:\Program Files\omnistat\omnistat.exe" upgrade`, with the same flags.
+
+- **Idempotent.** A host that is up to date reports so and downloads nothing, so a fleet
+  can run the same command on every host. Without `--version`, upgrade never picks a
+  pre-release and never goes back to an older release.
+- **Proxy.** The download uses `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` from upgrade's own
+  environment if any is set, else the proxy stored for the service at install. So after
+  `sudo` it just works behind the proxy the service already uses.
+- **Mirror.** Hosts that cannot reach GitHub can use a mirror with the same layout:
+  `latest/download/checksums.txt`, and `download/<tag>/<file>` for each release file.
+  Set `OMNISTAT_RELEASES_URL=https://mirror.example/omnistat` and pass it through `sudo`
+  (`sudo --preserve-env=OMNISTAT_RELEASES_URL …`). It must be `https://`.
+- **From 0.3.0 or older.** Those versions have no `upgrade` command, but any newer binary
+  upgrades them. Run `sudo ./omnistat upgrade` once from a downloaded copy, or install it
+  by hand as before.
+- **Trust.** The checksum proves the download is intact and matches the release. It does
+  not prove who built the release: releases are not signed yet (ADR-0013).
+- **By hand**, as before: unpack the new release and run `service install` from it.
 
 ### Modules
 

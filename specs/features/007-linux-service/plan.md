@@ -332,8 +332,8 @@ records go to stderr, which is the journal, with `<N>` prefixes. On SIGTERM it s
 | FR-022 | handler priorities per level, json/text; `PriorityWriter`; `JournalStream` true on the matching dev:ino, false otherwise | `internal/systemd/journal_test.go` |
 | FR-024 | dry-run: zero host calls, unit text shown, no secrets | `install_test.go`, cli test |
 | real host files | `WriteFile` atomic + mode, `CreateFile` no-clobber, `ParseShow` | `internal/systemd/host_linux_test.go` |
-| NFR-001, NFR-002, NFR-005 | container acceptance (agent), then the owner's runbook | `scripts/e2e-systemd.sh`, `acceptance.md` |
-| NFR-006 | Windows VM, next rc | 006 runbook additions |
+| NFR-001, NFR-002, NFR-005 | container acceptance (agent), then owner acceptance | `scripts/e2e-systemd.sh`, the owner's Fedora host |
+| NFR-006 | Windows VM, next rc | owner acceptance |
 
 All moved `winsvc` tests keep passing where they move. Windows-only tests still run in
 the Windows CI job. Locally, `GOOS=windows go vet` and the Windows lint pass are the gate.

@@ -224,7 +224,7 @@ Values are `float64`. `collect.validate` already accepts float64 for number and 
   (`ProtectSystem=strict`, `ProtectHome`, `PrivateDevices`, `DynamicUser`) does not
   break the readings. In containers `/` is overlay and the counters are the host's; that
   is fine for this purpose.
-- **Owner runbook** `specs/features/008-disk-module/acceptance.md`:
+- **Owner acceptance**:
   - Linux host (Fedora, service): compare with `df -B1 /`, `df -i /` and `iostat -dx 30`
     during a `dd` write. Check that an LVM/partitioned root counts a 1 GiB write once
     (US-3/2).
@@ -298,9 +298,9 @@ No new settings. `modules.disk.enabled`, `modules.disk.interval` and
 | FR-022 | `TestCollect_DebugRecordNamesPathAndDevices` (captured slog) | `disk_test.go` |
 | NFR-001 | T001 timing on the dev host; the `hostread` smoke test logs the duration | spike, `hostread` |
 | NFR-002 | the retained state is one map of counted devices (reviewed); no per-collect growth: `TestIO_StateDoesNotGrow` over 100 collects with rotating hot-plug names | `io_test.go` |
-| NFR-003 | no exec/write in code (review); e2e-systemd check; Windows runbook | `scripts/e2e-systemd.sh`, `acceptance.md` |
+| NFR-003 | no exec/write in code (review); e2e-systemd check; Windows owner acceptance | `scripts/e2e-systemd.sh` |
 | NFR-004 | fakes and injected clock only, no `time.Sleep` in tests; `make crosscheck` | — |
-| NFR-005 | `TestSandbox_Disk`, e2e-systemd check, owner runbook | `cli/sandbox_test.go`, script, `acceptance.md` |
+| NFR-005 | `TestSandbox_Disk`, e2e-systemd check, owner acceptance | `cli/sandbox_test.go`, script |
 | NFR-006 | `grep -rn gopsutil internal cmd` lists only `hostread`; goroutine smoke test covers `Disk` | `hostread` |
 
 ## Risks & unknowns
@@ -312,8 +312,8 @@ No new settings. `modules.disk.enabled`, `modules.disk.interval` and
   `hostread/disk_windows.go` that skips an unopenable volume instead of failing all of
   them. It is not built unless needed.
 - **Windows Server with disk performance counters disabled** yields an empty result and
-  an omission record every 30s (FR-015). That is accepted by the spec. The runbook notes
-  `diskperf -Y` as the operator's fix.
+  an omission record every 30s (FR-015). That is accepted by the spec. The operator's fix
+  is `diskperf -Y`.
 - **macOS is unverified**, as for `cpu` and `memory`: the data-volume choice, which IOKit
   objects count as disks (a mounted disk image likely does), and the sticky IOKit load
   failure. Covered by unit tests with a fake `Reader` and by `make crosscheck` only.
@@ -321,7 +321,7 @@ No new settings. `modules.disk.enabled`, `modules.disk.interval` and
   relies on unit tests plus the owner's optional ext4/XFS step.
 - **Containers** (e2e) see an overlay `/` and the host's `/proc/diskstats`. The e2e check
   therefore proves the sandbox does not break reading, not that the values are right.
-  Correctness comes from the host sandbox run and the owner's runbook.
+  Correctness comes from the host sandbox run and owner acceptance.
 - **Linux classification edge cases**: multipath (`dm-*` over two `sd*` paths to one
   LUN) counts each path's I/O, which is still once per I/O since each I/O takes one
   path. Some virtual block drivers (e.g. `rbd`, `nbd`) have a `device` link and count as

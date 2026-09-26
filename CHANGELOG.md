@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+### Added
+- `omnistat upgrade` updates the installed service (feature 009, ADR-0013). It needs the
+  same rights as install (`sudo` on Linux, an elevated prompt on Windows).
+  - It finds the latest release, or the one given with `--version`. That can be a
+    pre-release, or an older release to roll back to.
+  - It downloads the archive for this host and verifies it against the release's
+    `checksums.txt`, and checks that the new binary reports the expected version.
+  - It then runs the new binary's own `service install`, which keeps the stored settings
+    and the config.
+  - `--check` only reports: exit 0 when up to date, 2 when an upgrade is available.
+  - `--dry-run` shows what the new version's install would change.
+  - Downloads use the proxy stored for the service when the environment sets none.
+  - `OMNISTAT_RELEASES_URL` names an HTTPS mirror.
+  - The download is unpacked next to the installed binary, never in `/tmp`, so hosts
+    with a `noexec` `/tmp` work.
+- Spec 009 (`omnistat upgrade`), ADR-0013 (proposed: what upgrade trusts).
+- `make e2e-upgrade`: container acceptance of upgrade (Fedora 44, Debian 12, Rocky 8).
+
 ## [0.3.0] - 2026-09-26
 
 omnistat reports disk space and disk I/O.

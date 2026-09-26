@@ -107,7 +107,7 @@ Every task ends green on `make all` unless it says otherwise.
   against `df -B1 /` (998500204544 / 392678731776 → 929.92 / 365.71 GiB; `df` 61%). The
   startup log listed `disk interval=30s`, and the btrfs notice appeared once. During a
   3 GiB `dd oflag=direct` the first-collect rates were non-zero (55.24 MiB/s write,
-  busy 13.49%); accuracy against `iostat` is left to the runbook.
+  busy 13.49%); accuracy against `iostat` is left to owner acceptance.
   **Found and fixed:** module log records bypassed the process logger. The CLI never
   made it slog's default, so the `disk read` debug record (FR-022) was always dropped,
   and `cpu`/`memory` omission records ignored `log.level`/`log.format` and never reached
@@ -139,14 +139,6 @@ Every task ends green on `make all` unless it says otherwise.
   `log.level: debug`. They depend on the T009 logger fix: before it, the debug record
   could not reach the journal.
 
-- [x] **T012** Owner runbook `acceptance.md` (NFR-005): the Linux host as a service
-  (`df`, `df -i`, `iostat` under a `dd` write, LVM/partition counted once), an optional
-  ext4/XFS host for inodes, and the Windows VM with a pre-release build (startup skips,
-  `Get-Volume`, `Get-Counter` during a copy, no `disk` omission event). Include a results
-  table.
-  (files: `specs/features/008-disk-module/acceptance.md`) — verify: `make specs-check`;
-  the owner reads it before tagging an `-rc`.
-
 ## Phase 4 — Sync
 
 - [x] **T013** Gates: `make all`, `make test-race`, `make crosscheck`, `make specs-check`.
@@ -155,7 +147,7 @@ Every task ends green on `make all` unless it says otherwise.
 - [x] **T014** Docs: `README.md` (module table row, "system volume" and "physical disks"
   paragraph, config example), `CHANGELOG.md` *Unreleased*, `internal/README.md` (`hostread`
   row gains disk, new `module/disk` row, `moduletest` note).
-- [x] **T015** Owner acceptance (Linux host + Windows VM) per `acceptance.md`, with the
+- [x] **T015** Owner acceptance (Linux host + Windows VM), with the
   results recorded. If Windows shows the virtual-account failure (plan Risks), stop and
   plan the `hostread` fallback as an amendment before going further.
   **Done 2026-09-26.** The owner confirmed both parts as a whole, with no per-step table

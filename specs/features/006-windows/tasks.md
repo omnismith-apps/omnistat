@@ -92,10 +92,6 @@ runs when the owner pushes. A Windows failure then reopens the task it belongs t
   `service_test.go`, `identity.go`, `cli.go`) — verify: `make all crosscheck`.
 
 ## Phase 5 — Acceptance, docs, sync
-- [x] T049 Write `specs/features/006-windows/acceptance.md`: the T050 runbook. It gives
-  exact PowerShell commands and an expected result per step, and a results table for the
-  owner to fill in. It ends with what to send back. (files: `acceptance.md`) — verify:
-  every NFR-005 item and every T050 step below is covered.
 - [x] T050 VM acceptance, run **by the owner** on their own `windows/amd64` VM against a
   dedicated project and throwaway token on the production API (NFR-005, and FR-001,
   FR-015, FR-024 and FR-026, which only a real host shows). It starts from a pre-release

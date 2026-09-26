@@ -240,8 +240,8 @@ file.
   footnote.
 - **Acceptance is manual and remote.** The owner runs it on their own Windows VM against
   a dedicated project and throwaway token on the production API (decided 2026-09-25).
-  The agent cannot observe it, so T050 is a runbook (`acceptance.md`) with an expected
-  result per step. The owner reports back, and the results are recorded in the spec. The
+  The agent cannot observe it. The owner reports back, and the results are recorded in
+  the spec. The
   build under test comes from the release pipeline as a pre-release tag (for example
   `v0.2.0-rc.1`), so the archive tested is the archive shipped.
 

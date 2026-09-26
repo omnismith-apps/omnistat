@@ -50,8 +50,8 @@ dockerfile() {
 	local base install
 	case "$1" in
 	fedora44) base=fedora:44 install="dnf -y install systemd procps-ng util-linux util-linux-script && dnf clean all" ;;
-	debian12) base=debian:12 install="apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv procps util-linux && rm -rf /var/lib/apt/lists/*" ;;
-	ubuntu2404) base=ubuntu:24.04 install="apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv procps util-linux && rm -rf /var/lib/apt/lists/*" ;;
+	debian12) base=debian:12 install="apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv procps util-linux ca-certificates && rm -rf /var/lib/apt/lists/*" ;;
+	ubuntu2404) base=ubuntu:24.04 install="apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv procps util-linux ca-certificates && rm -rf /var/lib/apt/lists/*" ;;
 	rocky9) base=rockylinux:9 install="dnf -y install systemd procps-ng util-linux && dnf clean all" ;;
 	rocky8) base=rockylinux:8 install="dnf -y install systemd procps-ng util-linux && dnf clean all" ;;
 	*) echo "unknown distro $1 (known: $ALL_DISTROS)" >&2; return 1 ;;
@@ -108,22 +108,29 @@ identity() { # the host entity id, as the service's own settings resolve it
 		sed -n 's/.*"entity_id": *"\([0-9a-f-]*\)".*/\1/p'
 }
 
-run_distro() {
+# boot starts the distro's container C and waits for systemd. Docker's --tmpfs
+# is noexec, so /tmp is noexec in it, as on a CIS-hardened host.
+boot() {
 	DISTRO=$1
 	C=omnistat-e2e-$DISTRO
 	echo "== $DISTRO"
-	dockerfile "$DISTRO" | docker build -q -t "$C" - >/dev/null || { ko "image build"; return; }
+	dockerfile "$DISTRO" | docker build -q -t "$C" - >/dev/null || { ko "image build"; return 1; }
 	docker rm -f "$C" >/dev/null 2>&1
 	docker run -d --name "$C" --privileged --cgroupns=private --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
-		--add-host host.docker.internal:host-gateway "$C" >/dev/null || { ko "container start"; return; }
-	local i st out pid id1 id2
+		--add-host host.docker.internal:host-gateway "$C" >/dev/null || { ko "container start"; return 1; }
+	local i st
 	for ((i = 0; i < 60; i++)); do
 		st=$(in_c systemctl is-system-running 2>/dev/null)
 		[[ "$st" == running || "$st" == degraded ]] && break
 		sleep 1
 	done
-	in_c systemd-machine-id-setup --commit >/dev/null 2>&1 # keep the identity across the reboot below
+	in_c systemd-machine-id-setup --commit >/dev/null 2>&1 # keep the identity across a reboot
 	echo "   $(in_c sh -c 'systemctl --version | head -1'); system $st"
+}
+
+run_distro() {
+	boot "$1" || return
+	local out pid id1 id2
 	in_c mkdir -p /opt/dl /opt/dl2
 	docker cp -q "$BIN" "$C:/opt/dl/omnistat"
 	docker cp -q "$BIN" "$C:/opt/dl2/omnistat"
@@ -274,12 +281,20 @@ run_distro() {
 	has "foreign unit: refused, its path named (FR-019)" "did not write: /etc/systemd/system/omnistat.service" "$out"
 }
 
+# summary prints the result and fails when any check did.
+summary() {
+	echo
+	echo "passed $pass, failed $fail"
+	for n in "${notes[@]}"; do echo "  note: $n"; done
+	for f in "${failed[@]}"; do echo "  FAIL $f"; done
+	[[ $fail -eq 0 ]]
+}
+
+# Sourced (scripts/e2e-upgrade.sh): provide the harness only.
+[[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
+
 for d in ${*:-$ALL_DISTROS}; do
 	run_distro "$d"
 	[[ -n "${E2E_KEEP:-}" ]] || docker rm -f "omnistat-e2e-$d" >/dev/null 2>&1
 done
-echo
-echo "passed $pass, failed $fail"
-for n in "${notes[@]}"; do echo "  note: $n"; done
-for f in "${failed[@]}"; do echo "  FAIL $f"; done
-[[ $fail -eq 0 ]]
+summary

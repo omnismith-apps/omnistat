@@ -18,6 +18,7 @@ import (
 	"github.com/omnismith-apps/omnistat/internal/config"
 	"github.com/omnismith-apps/omnistat/internal/module"
 	"github.com/omnismith-apps/omnistat/internal/systemd"
+	"github.com/omnismith-apps/omnistat/internal/upgrade"
 	"github.com/omnismith-apps/omnistat/internal/winsvc"
 )
 
@@ -45,7 +46,9 @@ const (
 // the Windows service manager and systemd seams of `omnistat service`
 // (006 NFR-003, 007 NFR-004), set by tests; with neither, the platform's own
 // is used. ServiceSettle shortens install's post-start watch in tests; 0
-// means 5s (FR-011).
+// means 5s (FR-011). Runner runs omnistat binaries for `upgrade` and StageDir
+// is where it unpacks the download (spec 009); tests set both, nil and empty
+// mean child processes and the installed binary's directory.
 type App struct {
 	Registry      *module.Registry
 	Version       string
@@ -58,6 +61,8 @@ type App struct {
 	ServiceHost   winsvc.Host
 	SystemdHost   systemd.Host
 	ServiceSettle time.Duration
+	Runner        upgrade.Runner
+	StageDir      string
 }
 
 // goos is the platform the collectable check gates on (spec 004 FR-017…022).
@@ -143,6 +148,8 @@ func (a *App) Run(ctx context.Context, args []string, stdout, stderr io.Writer, 
 		return a.run(e, rest[1:])
 	case "service":
 		return a.service(e, rest[1:])
+	case "upgrade":
+		return a.upgrade(e, rest[1:])
 	case "help", "-h", "--help":
 		a.usage(stdout, fs)
 		return ExitOK
@@ -176,6 +183,11 @@ Commands:
   service uninstall [--dry-run]
                          remove the service, its stored settings and the installed binary;
                          the configuration is kept
+  upgrade [--check | --dry-run] [--version vX.Y.Z]
+                         update the installed service to the latest release (or --version):
+                         download, verify against checksums.txt, then run the new binary's
+                         service install; --check only reports (exit 2 = upgrade available);
+                         needs the same rights as service install
   version                print the version
   help                   this text
 

@@ -30,6 +30,8 @@ func (a *App) serviceSettle() time.Duration {
 type installer interface {
 	PlanInstall(ctx context.Context, o service.InstallOptions) (*service.Plan, error)
 	PlanUninstall(ctx context.Context) (*service.Plan, error)
+	// Installation describes the installed service for upgrade (spec 009).
+	Installation(ctx context.Context) (service.Installation, error)
 }
 
 type windowsInstaller struct{ h winsvc.Host }
@@ -42,6 +44,10 @@ func (w windowsInstaller) PlanUninstall(ctx context.Context) (*service.Plan, err
 	return winsvc.PlanUninstall(ctx, w.h)
 }
 
+func (w windowsInstaller) Installation(ctx context.Context) (service.Installation, error) {
+	return winsvc.Installation(ctx, w.h)
+}
+
 type systemdInstaller struct{ h systemd.Host }
 
 func (s systemdInstaller) PlanInstall(ctx context.Context, o service.InstallOptions) (*service.Plan, error) {
@@ -50,6 +56,10 @@ func (s systemdInstaller) PlanInstall(ctx context.Context, o service.InstallOpti
 
 func (s systemdInstaller) PlanUninstall(ctx context.Context) (*service.Plan, error) {
 	return systemd.PlanUninstall(ctx, s.h)
+}
+
+func (s systemdInstaller) Installation(ctx context.Context) (service.Installation, error) {
+	return systemd.Installation(ctx, s.h)
 }
 
 // errServiceUnsupported: no service backend on this platform (006 FR-027,

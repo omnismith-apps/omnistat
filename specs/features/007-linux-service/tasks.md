@@ -125,12 +125,8 @@ the dev host: real systemd work happens only in the disposable containers of T05
   Rocky 9 and Rocky 8, against the local API. Record per-distro results, the
   `systemd-analyze security` score (NFR-002) and any deviation in the spec's
   implementation notes. — verify: all scenarios PASS, or a deviation recorded and agreed.
-- [x] T051 `acceptance.md` runbook for the owner's Fedora host (NFR-005/2), and 006
-  runbook additions for the starter and project prompt (NFR-006). (files:
-  `specs/features/007-linux-service/acceptance.md`,
-  `specs/features/006-windows/acceptance.md`) — verify: owner runs it.
 - [x] T052 Sync:
-  - draft ADR-0012 and accept it after owner review; *(accepted 2026-09-25, after the owner's runbooks passed)*
+  - draft ADR-0012 and accept it after owner review; *(accepted 2026-09-25, after owner acceptance)*
   - edit spec 006 (FR-012/FR-027 amended, US-7/3) and note 003's journal and notify
     extensions;
   - CHANGELOG *Unreleased*;

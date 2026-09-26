@@ -94,3 +94,15 @@ func NoteIf(cond bool, note string) string {
 	}
 	return ""
 }
+
+// Installation is what `omnistat upgrade` needs to know about the installed
+// service (spec 009 FR-003, FR-005, FR-012).
+type Installation struct {
+	// Exists: omnistat's own service is installed.
+	Exists bool
+	// Binary is the program the service runs.
+	Binary string
+	// Settings are the settings stored for the service; upgrade uses their
+	// proxy only.
+	Settings map[string]string
+}

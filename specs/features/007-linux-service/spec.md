@@ -334,8 +334,7 @@ directory, as on Linux, so that I can see what can be configured without the REA
      - uninstall leaving only `/etc/omnistat`;
      - the NFR-001 checks as a non-root user;
      - `systemd-analyze security`.
-  2. **By the owner, on their Fedora workstation**, following
-     `specs/features/007-linux-service/acceptance.md` with `sudo`: install, reboot,
+  2. **By the owner, on their Fedora workstation**, with `sudo`: install, reboot,
      journal, the checks as a standard user, upgrade, uninstall. The host is left as it
      was apart from `/etc/omnistat`.
 - **NFR-006** (acceptance, Windows) The amendments to 006 (FR-014, FR-017) are verified
@@ -469,10 +468,10 @@ None.
 All tasks are done. `make all crosscheck` is green, and golangci-lint is clean for the
 Windows build too.
 
-**Owner acceptance, 2026-09-25.** The owner ran both runbooks and confirmed them as a
-whole; no per-step table was recorded:
-- `acceptance.md` on their Fedora workstation, with `sudo` (NFR-005/2);
-- 006 runbook step 17 on their Windows VM (NFR-006): the project prompt, and the starter
+**Owner acceptance, 2026-09-25.** The owner accepted both platforms as a whole; no
+per-step results were recorded:
+- their Fedora workstation, with `sudo` (NFR-005/2);
+- their Windows VM (NFR-006): the project prompt, and the starter
   config created once with the directory's ACL and then kept. The same Windows run
   covers 006 FR-020.
 

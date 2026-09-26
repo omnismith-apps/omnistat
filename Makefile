@@ -4,7 +4,7 @@ VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 GORELEASER := go run github.com/goreleaser/goreleaser/v2@v2.17.1
 
-.PHONY: all build crosscheck vet-windows release-check release-snapshot run test test-race lint vet fmt tidy sandbox e2e-systemd specs-check clean help
+.PHONY: all build crosscheck vet-windows release-check release-snapshot run test test-race lint vet fmt tidy sandbox e2e-systemd e2e-upgrade specs-check clean help
 
 # Every target constitution V requires a static binary for, plus the Windows pairs
 # that 004 NFR-005 keeps compiling so the cross-platform readings cannot rot.
@@ -61,6 +61,9 @@ sandbox: ## Run build-tagged tests against a real project (sources ./.env; creat
 
 e2e-systemd: build ## Container acceptance of `service` on systemd (Docker, ./.env, local API; DISTROS="fedora44 …")
 	./scripts/e2e-systemd.sh $(DISTROS)
+
+e2e-upgrade: build ## Container acceptance of `upgrade` (Docker, ./.env, local API, GitHub; DISTROS="fedora44 …")
+	./scripts/e2e-upgrade.sh $(DISTROS)
 
 specs-check: ## Validate spec folder structure and frontmatter
 	./scripts/check-specs.sh
