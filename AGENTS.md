@@ -95,6 +95,11 @@ make release-snapshot  # every release archive into dist/, nothing published
   its own write, wait boundedly with `internal/settle`. Never treat "not visible yet"
   as "absent", and never re-create on that basis. Tests of such paths set the fake's
   `SearchLag`/`SchemaLag`. Details: `docs/reference/omnismith-api-notes.md`.
+- **Entities omnistat owns are identified by their platform `external_key`** (ADR-0014):
+  the host by its identity, a module-owned entity (an *entity template* with a host
+  link, spec 011) by the key its provider supplies. Resolution is lookup by key, then
+  upsert by key, with no search and no settle wait; the key does not lag. Never
+  overwrite or clear a key.
 - Every call carries `Authorization: Bearer omni_…` and `X-Omnismith-Project-Id`.
 - Prefer **slugs** over UUIDs; resolve ids at startup from `GET /discovery/project-schema`.
 

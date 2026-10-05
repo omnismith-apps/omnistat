@@ -67,11 +67,29 @@ func Volume() module.Module {
 	}}
 }
 
+// Gadget is a fixture with an entity template (spec 011): records of their
+// own on template "gadget", linked to the host by "host", plus one value on
+// the host entity. Like Probe, its name and slugs are unlike any shipped
+// module's.
+func Gadget() module.Module {
+	return module.Static{M: manifest.Manifest{
+		Module:    "gadget",
+		Templates: []manifest.Template{{Slug: "gadget", Name: "Gadget", Description: "A device a host manages", Entity: true}},
+		Attributes: []manifest.Attribute{
+			{Key: "host", Name: "Managed by", Slug: "gadget_host", Kind: manifest.KindReference, Template: "gadget", Target: manifest.HostTemplate},
+			{Key: "name", Name: "Gadget name", Slug: "gadget_name", Kind: manifest.KindText, Template: "gadget"},
+			{Key: "on", Name: "Gadget on", Slug: "gadget_on", Kind: manifest.KindBoolean, Template: "gadget"},
+			{Key: "level", Name: "Gadget level", Slug: "gadget_level_pct", Kind: manifest.KindMetric, Template: "gadget"},
+			{Key: "count", Name: "Gadget count", Slug: "gadget_count", Kind: manifest.KindNumber},
+		},
+	}}
+}
+
 // Ident is a fixture standing in for the required identity module.
 func Ident() module.Module {
 	return module.Static{M: manifest.Manifest{
 		Module:     "ident",
-		Attributes: []manifest.Attribute{{Key: "id", Name: "Identity", Slug: "ident_id", Kind: manifest.KindText}},
+		Attributes: []manifest.Attribute{{Key: "id", Name: "Identity", Slug: "ident_id", Kind: manifest.KindText, Label: 1}},
 	}}
 }
 

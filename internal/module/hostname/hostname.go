@@ -45,6 +45,7 @@ func (m *Module) Manifest() manifest.Manifest {
 			Slug:        "hostname",
 			Kind:        manifest.KindText,
 			Description: "Hostname reported by the operating system",
+			Label:       2, // what a host link shows (spec 011 FR-003)
 		}},
 	}
 }

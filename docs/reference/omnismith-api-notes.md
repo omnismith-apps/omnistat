@@ -200,7 +200,7 @@ gopsutil v4.26.8 `net.IOCountersWithContext(ctx, true)` and
   "not implemented". Nothing is read there (spec 010 FR-018).
 - All six `make crosscheck` targets built the spike with `CGO_ENABLED=0`.
 
-## Entity external keys (studied 2026-10-05, SDK v1.0.18; not yet used by omnistat)
+## Entity external keys (studied 2026-10-05, SDK v1.0.18; used since spec 011, ADR-0014)
 
 An entity may hold an **`external_key`**: the id another system uses for it. It is a
 standard field next to `id`, `created_at` and `updated_at`, not an attribute.
@@ -222,6 +222,28 @@ standard field next to `id`, `created_at` and `updated_at`, not an attribute.
 - Create, batch (`op: upsert`), CSV import/export, search filters and sort, and
   automation templates (`{entity.external_key}`, `create_entity` actions) all know the
   key. Server source: `api-ng/src/Entity/Application/Command/UpsertEntityByKey/Handler.php`.
+- **Lookup does not lag.** `GET …/by-key` resolves the key with
+  `findLiveByExternalKey` on the entity table, then reads the record like `GET
+  /entities/{id}`. An upsert's record is therefore visible to a lookup at once; only
+  search lags. This is why spec 011 needs no settle wait.
+- **SDK v1.0.18 bug:** `EntityResponseAttributeValues` is a oneOf (map | array). Its
+  generated decoder treats an empty object `{}` as matching neither and fails with
+  "data failed to match schemas". The API returns `{}` for a record with no values (or
+  a `fields` projection that selects none). `omni.EntityByKey` reads the `id` from the
+  raw body in that case (`idDespiteDecodeError`). Do not project lookups to
+  `fields=id`. To report upstream.
+
+## Reference attributes (spec 011, 2026-10-05)
+
+- Created with `attribute_type: 3` (data type 0) and `reference_config
+  {target_template_id, target_attribute_id}`. **Both ids are required** (the display
+  attribute is not optional). omnistat therefore creates references after every other
+  attribute in a plan.
+- Discovery reports `type: "reference"` and `reference {target_template_id,
+  target_template_slug, target_attribute_id, target_attribute_slug}`.
+- A reference value is written as the referenced entity's UUID, like any other
+  dimension (`{value: "<uuid>", updated_at}`); reads show the target's display value,
+  with the id in `reference_entity_ids`.
 
 ## Writes are processed asynchronously — never assume read-your-writes
 

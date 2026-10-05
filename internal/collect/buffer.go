@@ -21,6 +21,27 @@ type Sample struct {
 	Value any
 	// At is when the provider returned it (FR-006), UTC.
 	At time.Time
+	// Target is the entity the sample belongs to; zero is the host (spec 011
+	// FR-006).
+	Target Target
+}
+
+// Target identifies a module-owned entity (spec 011 FR-006): the module, the
+// entity template's resolved slug and the record's key. The zero value is the
+// host entity.
+type Target struct {
+	Module   string
+	Template string
+	Key      string
+}
+
+// IsHost reports whether t is the host entity.
+func (t Target) IsHost() bool { return t == Target{} }
+
+// Sink receives validated samples: a Buffer for the host alone, or Buffers
+// for the host and every module-owned entity.
+type Sink interface {
+	Add(Sample)
 }
 
 // IsMetric reports whether the sample belongs to a metric attribute.

@@ -35,6 +35,18 @@ func Validate(manifests []Manifest) error {
 			}
 		}
 
+		entity := map[string]bool{} // entity template slug → declared
+		for _, t := range m.Templates {
+			if !t.Entity {
+				continue
+			}
+			entity[t.Slug] = true
+			if t.Slug == HostTemplate {
+				add("module %q: the host template cannot be an entity template", m.Module)
+			}
+		}
+		links := map[string]int{} // entity template slug → host links on it
+
 		seenKey := map[string]bool{}
 		for _, a := range m.Attributes {
 			where := fmt.Sprintf("module %q attribute %q", m.Module, a.Key)
@@ -80,10 +92,28 @@ func Validate(manifests []Manifest) error {
 			if a.Template != "" && !ValidSlug(a.Template) {
 				add("%s: template slug %q must match ^[a-z][a-z0-9_]*$", where, a.Template)
 			}
+			switch {
+			case a.Kind == KindReference && a.Target != HostTemplate:
+				add("%s: a reference may only target the host template %q (spec 011 FR-002), not %q", where, HostTemplate, a.Target)
+			case a.Kind == KindReference && !entity[a.Template]:
+				add("%s: a reference must sit on an entity template this module declares (spec 011 FR-001)", where)
+			case a.Kind == KindReference:
+				links[a.Template]++
+			case a.Target != "":
+				add("%s: only references may have a target", where)
+			}
+			if a.Label < 0 {
+				add("%s: label rank must not be negative", where)
+			}
 			for _, pl := range a.Platforms {
 				if !ValidPlatform(pl) {
 					add("%s: platform %q is not one of %s", where, pl, strings.Join(KnownPlatforms(), ", "))
 				}
+			}
+		}
+		for _, t := range m.Templates {
+			if t.Entity && links[t.Slug] != 1 {
+				add("module %q: entity template %q needs exactly one host link (a reference attribute on it), has %d", m.Module, t.Slug, links[t.Slug])
 			}
 		}
 	}

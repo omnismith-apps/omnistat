@@ -98,6 +98,9 @@ func (c *Client) ReadSchema(ctx context.Context) (schema.Current, error) {
 			continue
 		}
 		ca := schema.CurrentAttribute{ID: a.GetId(), Slug: slug, Name: a.GetName(), Type: a.GetType()}
+		if ref, ok := a.GetReferenceOk(); ok && ref != nil {
+			ca.RefTemplateID = ref.GetTargetTemplateId()
+		}
 		for _, o := range a.GetOptions() {
 			ca.Options = append(ca.Options, o.GetValue())
 			if ca.OptionIDs == nil {
@@ -147,6 +150,12 @@ func (c *Client) CreateAttribute(ctx context.Context, p schema.CreateAttributePa
 	if len(p.TemplateIDs) > 0 {
 		req.SetTemplateIds(p.TemplateIDs)
 	}
+	if p.Kind == manifest.KindReference {
+		ref := omnismithsdk.NewCreateAttributeRequestReferenceConfig()
+		ref.SetTargetTemplateId(p.RefTemplateID)
+		ref.SetTargetAttributeId(p.RefDisplayID)
+		req.SetReferenceConfig(*ref)
+	}
 	res, resp, err := c.sdk.AttributesAPI.CreateAttribute(ctx).CreateAttributeRequest(*req).Execute() //nolint:bodyclose // Execute drains and closes the body
 	if err != nil {
 		return "", mapErr("create attribute "+p.Slug, resp, err)
@@ -190,6 +199,8 @@ func enums(k manifest.Kind) (attributeType, dataType int32, err error) {
 		return 1, 1, nil
 	case manifest.KindList:
 		return 2, 0, nil
+	case manifest.KindReference:
+		return 3, 0, nil
 	}
 	return 0, 0, fmt.Errorf("omnismith: kind %q cannot be created", k)
 }

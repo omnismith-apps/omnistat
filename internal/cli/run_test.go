@@ -152,14 +152,17 @@ func TestRun_OnceFreshProject(t *testing.T) {
 	if m := h.srv.EntityMetrics(id)["probe_usage_pct"]; len(m) != 1 || m[0].Value != "1" || m[0].UpdatedAt != "2026-09-22T10:00:00Z" {
 		t.Fatalf("metrics: %+v", m)
 	}
+	if e := h.srv.Entities()[0]; e.ExternalKey != machineid.Derive(rawID) {
+		t.Fatalf("host entity key = %q, want the identity (spec 011 FR-007)", e.ExternalKey)
+	}
 	// Order: schema writes, then entity create, then PATCH, then metrics.
 	var order []string
 	for _, q := range h.srv.Requests() {
 		switch {
 		case q.Method == "POST" && (q.Path == "/templates" || q.Path == "/attributes"):
 			order = append(order, "schema")
-		case q.Method == "POST" && strings.HasPrefix(q.Path, "/entities/template/"):
-			order = append(order, "create")
+		case q.Method == "PUT" && strings.HasPrefix(q.Path, "/entities/template/") && strings.HasSuffix(q.Path, "/by-key"):
+			order = append(order, "create") // spec 011 FR-011: created holding its key
 		case q.Method == "PATCH" && strings.HasPrefix(q.Path, "/entities/"):
 			order = append(order, "patch")
 		case strings.HasSuffix(q.Path, "/metrics"):

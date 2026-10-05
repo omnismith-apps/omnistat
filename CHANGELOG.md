@@ -5,8 +5,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+Every record omnistat owns is identified by its platform key, and modules may own records of their own.
+
+### Added
+- Records other than the host (feature 011, ADR-0014): a module can own an *entity
+  template*. Each record is created once, linked to the host by a reference that shows
+  the hostname, and published with its own values. `run --dry-run` shows each record,
+  and whether it would be created.
+
 ### Changed
-- Omnismith Go SDK upgraded from v1.0.15 to v1.0.18. No change in behaviour.
+- **The host entity is found by its platform external key** (feature 011, ADR-0014),
+  the identity omnistat always had, with no search and no wait. A first start creates
+  it atomically, so two concurrent first starts can no longer create two host entities.
+  Host entities created by 0.5.0 and earlier are **adopted** on the first start: found
+  by `machine_id` once and given their key. A key someone else already set is never
+  changed. `omnistat identity` says when a host would be adopted. `machine_id` is still
+  published.
+- The one-shot `run` exits with the partial status when a module's record could not be
+  written.
+- Omnismith Go SDK upgraded from v1.0.15 to v1.0.18.
 
 ## [0.5.0] - 2026-09-27
 

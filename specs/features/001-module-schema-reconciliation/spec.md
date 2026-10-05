@@ -123,6 +123,8 @@ and hosts without schema permissions to still work against an already-reconciled
   errors reported before any network call.
 - **FR-005** Reference attributes and file/image/markdown data types are OUT of scope
   for manifests in this feature; a manifest declaring them MUST be rejected by FR-004.
+  *(Amended 2026-10-05 by spec 011 FR-002: the `reference` kind is accepted as the host link
+  of an entity template, targeting the host template only.)*
 
 ### Configuration & overrides
 - **FR-006** The operator MUST be able to enable or disable each module; the shipped

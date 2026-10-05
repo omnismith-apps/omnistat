@@ -34,17 +34,24 @@ func Diff(d manifest.Desired, cur Current) Plan {
 	attrs := append([]manifest.DesiredAttribute(nil), d.Attributes...)
 	sort.Slice(attrs, func(i, j int) bool { return attrs[i].Slug < attrs[j].Slug })
 
-	var options, binds []Action
+	// References are created after every other attribute, so that the display
+	// attribute they name exists first (spec 011 FR-003; FR-019 order kept).
+	var refs, options, binds []Action
 	for _, a := range attrs {
 		want := TypeOf(a.Kind)
 		existing, ok := cur.Attributes[a.Slug]
 		if !ok {
 			tpls := append([]string(nil), a.Templates...)
 			sort.Strings(tpls)
-			p.Actions = append(p.Actions, Action{
+			create := Action{
 				Type: CreateAttribute, Attribute: a.Slug, Name: a.Name, Description: a.Description,
-				Kind: a.Kind, Templates: tpls, Module: a.Module,
-			})
+				Kind: a.Kind, Templates: tpls, Module: a.Module, Target: a.Target, Display: a.Display,
+			}
+			if a.Kind == manifest.KindReference {
+				refs = append(refs, create)
+				continue
+			}
+			p.Actions = append(p.Actions, create)
 			for _, o := range a.Options {
 				options = append(options, Action{Type: AddListOption, Attribute: a.Slug, Option: o, Module: a.Module})
 			}
@@ -53,6 +60,15 @@ func Diff(d manifest.Desired, cur Current) Plan {
 		if existing.Type != want {
 			p.Conflicts = append(p.Conflicts, Conflict{Slug: a.Slug, Module: a.Module, Expected: string(a.Kind), Actual: existing.Type})
 			continue
+		}
+		if a.Kind == manifest.KindReference {
+			// A host link must point at the host template; its display
+			// attribute is cosmetic and never compared (spec 011 FR-004).
+			if tpl, ok := cur.Templates[a.Target]; !ok || existing.RefTemplateID != tpl.ID {
+				p.Conflicts = append(p.Conflicts, Conflict{Slug: a.Slug, Module: a.Module,
+					Expected: "reference → " + a.Target, Actual: "reference → " + templateSlugOf(cur, existing.RefTemplateID)})
+				continue
+			}
 		}
 		if a.Kind == manifest.KindList {
 			have := map[string]bool{}
@@ -92,6 +108,7 @@ func Diff(d manifest.Desired, cur Current) Plan {
 	}
 	// Options keep manifest order within an attribute; attributes are already
 	// sorted, so the whole list is deterministic (FR-019).
+	p.Actions = append(p.Actions, refs...)
 	p.Actions = append(p.Actions, options...)
 	sort.SliceStable(binds, func(i, j int) bool {
 		if binds[i].Attribute != binds[j].Attribute {
@@ -102,4 +119,18 @@ func Diff(d manifest.Desired, cur Current) Plan {
 	p.Actions = append(p.Actions, binds...)
 	sort.Slice(p.Conflicts, func(i, j int) bool { return p.Conflicts[i].Slug < p.Conflicts[j].Slug })
 	return p
+}
+
+// templateSlugOf names a template by id for a conflict message, falling back
+// to the id when the template has no slug omnistat can see.
+func templateSlugOf(cur Current, id string) string {
+	for slug, t := range cur.Templates {
+		if t.ID == id {
+			return slug
+		}
+	}
+	if id == "" {
+		return "(none)"
+	}
+	return id
 }

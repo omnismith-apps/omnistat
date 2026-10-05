@@ -86,6 +86,7 @@ func (m *Module) Manifest() manifest.Manifest {
 			Slug:        "machine_id",
 			Kind:        manifest.KindText,
 			Description: "Stable identity of the host reporting through omnistat (derived from the OS machine id, or set by the operator)",
+			Label:       1, // a host link shows it when hostname is off (spec 011 FR-003)
 		}},
 	}
 }

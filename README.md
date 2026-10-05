@@ -199,7 +199,7 @@ On Windows, in an elevated PowerShell:
 
 | Module | Publishes | Default cadence |
 |--------|-----------|-----------------|
-| `machine-id` | `machine_id` (text) — the host entity's idempotency key; always enabled | once, at startup |
+| `machine-id` | `machine_id` (text) — the host's identity, which is also the host entity's external key; always enabled | once, at startup |
 | `hostname` | `hostname` (text) — the entity's human-readable label | 5m |
 | `cpu` | `cpu_usage_pct`, `load_avg_1`, `load_avg_5`, `load_avg_15` (metrics); `cpu_model`, `cpu_cores`, `cpu_arch` (dimensions) | 10s |
 | `memory` | `mem_used_pct`, `mem_available_mib` (metrics); `mem_total_mib` (dimension) | 30s |
@@ -256,6 +256,12 @@ among the readings omnistat takes, NTFS has no inode limit, and APFS creates ino
 demand. **`net_tcp_listen_drops_ps`, `net_tcp_time_wait` and `net_conntrack_used_pct` are
 Linux-only**, and **macOS collects no `net` value**: gopsutil reads its interface counters
 by running `netstat`, which omnistat never does.
+
+**Records other than the host** (spec 011). omnistat finds each record it owns by its
+platform **external key**: the host by its identity, a module's device
+by the key the module reports (no shipped module owns records yet; the `ups` module will). Host entities created by omnistat 0.5 and earlier are
+adopted on the first start: found by `machine_id` and given their key. A key that someone
+else already set is never changed.
 
 The host identity is derived from the OS machine id (`/etc/machine-id` on Linux,
 the platform UUID on macOS) as a keyed hash — the raw id is never published. Pin it

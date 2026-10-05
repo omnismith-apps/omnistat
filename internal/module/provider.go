@@ -12,7 +12,21 @@ import (
 type Observation struct {
 	Key   string
 	Value any
+	// Entity is the module-owned entity the value belongs to; the zero value
+	// is the host entity (spec 011 FR-006).
+	Entity Entity
 }
+
+// Entity names a module-owned entity (spec 011 FR-006): one of the module's
+// entity templates, by its manifest slug, and the key that identifies the
+// record within it. The provider never sees an entity id.
+type Entity struct {
+	Template string
+	Key      string
+}
+
+// IsHost reports whether e is the zero value, the host entity.
+func (e Entity) IsHost() bool { return e == Entity{} }
 
 // Provider is the optional value side of a module (spec 003 FR-001…004).
 // Collect is called by the core on demand, under a context whose deadline is

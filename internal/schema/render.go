@@ -20,7 +20,11 @@ func (p Plan) Text() string {
 		case CreateTemplate:
 			fmt.Fprintf(&b, "+ template %s (%q)\n", a.Template, a.Name)
 		case CreateAttribute:
-			fmt.Fprintf(&b, "+ attribute %s (%s) → %s  [%s]\n", a.Attribute, a.Kind, strings.Join(a.Templates, ", "), a.Module)
+			kind := string(a.Kind)
+			if a.Target != "" {
+				kind += " → " + a.Target // a host link (spec 011 FR-003)
+			}
+			fmt.Fprintf(&b, "+ attribute %s (%s) → %s  [%s]\n", a.Attribute, kind, strings.Join(a.Templates, ", "), a.Module)
 		case AddListOption:
 			fmt.Fprintf(&b, "+ option %s: %s  [%s]\n", a.Attribute, a.Option, a.Module)
 		case BindAttribute:

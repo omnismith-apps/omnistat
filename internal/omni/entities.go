@@ -2,7 +2,10 @@ package omni
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -13,7 +16,8 @@ import (
 
 var _ identity.API = (*Client)(nil)
 
-// FindEntities implements identity.API: exact match on one attribute, oldest first.
+// FindEntities implements identity.API: exact match on one attribute, oldest
+// first, with each record's external key.
 func (c *Client) FindEntities(ctx context.Context, templateID, attrSlug, value string) ([]identity.EntitySummary, error) {
 	filter := omnismithsdk.NewEntityFilter(attrSlug, "eq")
 	filter.SetValue(omnismithsdk.EntityFilterValue{String: &value})
@@ -27,14 +31,89 @@ func (c *Client) FindEntities(ctx context.Context, templateID, attrSlug, value s
 	}
 	var out []identity.EntitySummary
 	for _, e := range res.GetData() {
-		out = append(out, identity.EntitySummary{ID: e.GetId(), CreatedAt: e.GetCreatedAt()})
+		out = append(out, identity.EntitySummary{ID: e.GetId(), CreatedAt: e.GetCreatedAt(), Key: e.GetExternalKey()})
 	}
 	return out, nil
 }
 
-// CreateEntity implements identity.API. Values are sent as strings, numbers
-// or booleans according to their Go type.
+// EntityByKey implements identity.API: the live record of the template
+// holding key (spec 011 FR-011). Only the id is wanted, so the projection asks
+// for the standard fields only.
+func (c *Client) EntityByKey(ctx context.Context, templateSlug, key string) (string, bool, error) {
+	res, resp, err := c.sdk.EntityAPI.GetEntityByKey(ctx, templateSlug).Key(key).Execute() //nolint:bodyclose // Execute drains and closes the body
+	if id, ok := idDespiteDecodeError(resp, err); ok {
+		return id, true, nil
+	}
+	if err != nil {
+		err = mapErr("get entity by key", resp, err)
+		if errors.Is(err, ErrNotFound) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return res.GetId(), true, nil
+}
+
+// idDespiteDecodeError reads the id of a 2xx entity response the SDK could
+// not decode. SDK v1.0.18's oneOf decoder for attribute_values rejects an
+// empty object, which is what the API returns for a record with no values
+// (see docs/reference/omnismith-api-notes.md).
+func idDespiteDecodeError(resp *http.Response, err error) (string, bool) {
+	var gen *omnismithsdk.GenericOpenAPIError
+	if err == nil || resp == nil || resp.StatusCode/100 != 2 || !errors.As(err, &gen) {
+		return "", false
+	}
+	var body struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(gen.Body(), &body) != nil || body.ID == "" {
+		return "", false
+	}
+	return body.ID, true
+}
+
+// UpsertByKey implements identity.API: one atomic create-or-update by key
+// (spec 011 FR-011). A 409 is recognisable as identity.ErrKeyTaken.
+func (c *Client) UpsertByKey(ctx context.Context, templateSlug, key string, attrs map[string]any) (string, bool, error) {
+	values, err := plainValues("upsert entity", attrs)
+	if err != nil {
+		return "", false, err
+	}
+	req := omnismithsdk.NewUpsertEntityByKeyRequest(key, values)
+	res, resp, err := c.sdk.EntityAPI.UpsertEntityByKey(ctx, templateSlug).UpsertEntityByKeyRequest(*req).Execute() //nolint:bodyclose // Execute drains and closes the body
+	if err != nil {
+		return "", false, mapErr("upsert entity by key", resp, err)
+	}
+	return res.GetId(), res.GetCreated(), nil
+}
+
+// SetEntityKey implements identity.API: a partial update carrying only the
+// external key (spec 011 FR-012).
+func (c *Client) SetEntityKey(ctx context.Context, entityID, key string) error {
+	req := omnismithsdk.NewUpdateEntityRequest()
+	req.SetExternalKey(key)
+	resp, err := c.sdk.EntityAPI.UpdateEntity(ctx, entityID).UpdateEntityRequest(*req).Execute() //nolint:bodyclose // Execute drains and closes the body
+	return mapErr("set entity key", resp, err)
+}
+
+// CreateEntity creates an entity without a key. Resolution no longer uses
+// it; sandbox tests seed legacy host entities with it (spec 011 NFR-006).
 func (c *Client) CreateEntity(ctx context.Context, templateSlug string, attrs map[string]any) (string, error) {
+	values, err := plainValues("create entity", attrs)
+	if err != nil {
+		return "", err
+	}
+	req := omnismithsdk.NewCreateEntityRequest(values)
+	res, resp, err := c.sdk.EntityAPI.CreateEntity(ctx, templateSlug).CreateEntityRequest(*req).Execute() //nolint:bodyclose // Execute drains and closes the body
+	if err != nil {
+		return "", mapErr("create entity", resp, err)
+	}
+	return res.GetId(), nil
+}
+
+// plainValues renders attribute values as the SDK's scalar union: strings,
+// numbers or booleans according to their Go type.
+func plainValues(op string, attrs map[string]any) (map[string]omnismithsdk.EntityAttributesInputValue, error) {
 	values := make(map[string]omnismithsdk.EntityAttributesInputValue, len(attrs))
 	for slug, v := range attrs {
 		var in omnismithsdk.EntityAttributesInputValue
@@ -52,16 +131,11 @@ func (c *Client) CreateEntity(ctx context.Context, templateSlug string, attrs ma
 			f := float32(x)
 			in.Float32 = &f
 		default:
-			return "", fmt.Errorf("create entity: unsupported value type %T for %s", v, slug)
+			return nil, fmt.Errorf("%s: unsupported value type %T for %s", op, v, slug)
 		}
 		values[slug] = in
 	}
-	req := omnismithsdk.NewCreateEntityRequest(values)
-	res, resp, err := c.sdk.EntityAPI.CreateEntity(ctx, templateSlug).CreateEntityRequest(*req).Execute() //nolint:bodyclose // Execute drains and closes the body
-	if err != nil {
-		return "", mapErr("create entity", resp, err)
-	}
-	return res.GetId(), nil
+	return values, nil
 }
 
 // ChartPoint is one bucket of a metric series.

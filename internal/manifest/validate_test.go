@@ -40,7 +40,7 @@ func TestValidate_ReportsEveryProblem(t *testing.T) {
 		{"bad slug leading digit", func(m *manifest.Manifest) { m.Attributes[0].Slug = "1cpu" }, `slug "1cpu"`},
 		{"bad slug dash", func(m *manifest.Manifest) { m.Attributes[0].Slug = "cpu-model" }, `slug "cpu-model"`},
 		{"unknown kind", func(m *manifest.Manifest) { m.Attributes[0].Kind = "blob" }, `kind "blob"`},
-		{"reference kind rejected", func(m *manifest.Manifest) { m.Attributes[0].Kind = "reference" }, `kind "reference"`},
+		{"reference outside an entity template", func(m *manifest.Manifest) { m.Attributes[0].Kind = "reference" }, `a reference may only target the host template`},
 		{"file kind rejected", func(m *manifest.Manifest) { m.Attributes[0].Kind = "file" }, `kind "file"`},
 		{"list without options", func(m *manifest.Manifest) { m.Attributes[2].Options = nil }, "list attribute needs options"},
 		{"non-list with options", func(m *manifest.Manifest) { m.Attributes[0].Options = []string{"x"} }, "only list attributes may have options"},
@@ -103,13 +103,15 @@ func TestValidate_CrossModuleDuplicates(t *testing.T) {
 }
 
 func TestKind_Valid(t *testing.T) {
-	for _, k := range []manifest.Kind{manifest.KindText, manifest.KindNumber, manifest.KindBoolean, manifest.KindDate, manifest.KindDatetime, manifest.KindList, manifest.KindMetric} {
+	for _, k := range []manifest.Kind{manifest.KindText, manifest.KindNumber, manifest.KindBoolean, manifest.KindDate, manifest.KindDatetime, manifest.KindList, manifest.KindMetric, manifest.KindReference} {
 		if !k.Valid() {
 			t.Errorf("%q should be valid", k)
 		}
 	}
-	if manifest.Kind("reference").Valid() {
-		t.Error("reference must not be a valid manifest kind (FR-005)")
+	for _, k := range []manifest.Kind{"file", "image", "markdown"} {
+		if k.Valid() {
+			t.Errorf("%q must not be a valid manifest kind (FR-005)", k)
+		}
 	}
 }
 

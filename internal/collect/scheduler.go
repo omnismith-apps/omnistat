@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/omnismith-apps/omnistat/internal/identity"
 	"github.com/omnismith-apps/omnistat/internal/manifest"
 	"github.com/omnismith-apps/omnistat/internal/module"
 )
@@ -28,6 +29,12 @@ type Source struct {
 	// was already reported once at startup, so it is not an omission
 	// (spec 004 FR-016).
 	Unsupported map[string]bool
+	// Links holds the keys of the module's host links: the core sets them,
+	// so an observation for one is dropped (spec 011 FR-006).
+	Links map[string]bool
+	// Entities maps the module's entity templates, by manifest slug, to their
+	// resolved slugs (spec 011 FR-006).
+	Entities map[string]string
 }
 
 // Skipped is one thing the platform cannot collect, reported once at startup
@@ -65,6 +72,13 @@ func Sources(desired manifest.Desired, mods []module.Module, intervals map[strin
 			Interval:    p.DefaultInterval(),
 			Attrs:       map[string]manifest.DesiredAttribute{},
 			Unsupported: map[string]bool{},
+			Links:       map[string]bool{},
+			Entities:    map[string]string{},
+		}
+		for _, t := range desired.Templates {
+			if t.Entity && t.Module == m.Name() {
+				src.Entities[t.Key] = t.Slug
+			}
 		}
 		if d, ok := intervals[m.Name()]; ok {
 			src.Interval = d
@@ -75,6 +89,12 @@ func Sources(desired manifest.Desired, mods []module.Module, intervals map[strin
 		var gated []Skipped
 		for _, a := range desired.Attributes {
 			if a.Module != m.Name() {
+				continue
+			}
+			if a.Kind == manifest.KindReference {
+				// Not the provider's to report, and not what makes a module
+				// collectable (spec 011 FR-006).
+				src.Links[a.Key] = true
 				continue
 			}
 			if manifest.Collectable(a.Platforms, goos) {
@@ -120,7 +140,7 @@ func platformUnion(gated []Skipped) []string {
 // (FR-004, FR-006, FR-010, FR-011, FR-014).
 type Scheduler struct {
 	sources []Source
-	buf     *Buffer
+	buf     Sink
 	clock   Clock
 	log     *slog.Logger
 
@@ -130,7 +150,7 @@ type Scheduler struct {
 }
 
 // NewScheduler builds a scheduler; Run starts it.
-func NewScheduler(sources []Source, buf *Buffer, clock Clock, log *slog.Logger) *Scheduler {
+func NewScheduler(sources []Source, buf Sink, clock Clock, log *slog.Logger) *Scheduler {
 	if clock == nil {
 		clock = RealClock{}
 	}
@@ -191,7 +211,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 }
 
 // collectOne is the shared per-call path of Scheduler and Once.
-func collectOne(ctx context.Context, clock Clock, buf *Buffer, log *slog.Logger, src Source) error {
+func collectOne(ctx context.Context, clock Clock, buf Sink, log *slog.Logger, src Source) error {
 	cctx, cancel := withDeadline(ctx, clock, src.Interval)
 	obs, err := safeCollect(cctx, src.Provider)
 	cancel()
@@ -201,7 +221,12 @@ func collectOne(ctx context.Context, clock Clock, buf *Buffer, log *slog.Logger,
 		return err
 	}
 	kept := 0
+	var badKeys []string
 	for _, o := range obs {
+		if src.Links[o.Key] {
+			log.Error("observation dropped: the host link is set by the core", "module", src.Module, "key", o.Key)
+			continue
+		}
 		attr, ok := src.Attrs[o.Key]
 		if !ok {
 			if src.Unsupported[o.Key] {
@@ -214,16 +239,52 @@ func collectOne(ctx context.Context, clock Clock, buf *Buffer, log *slog.Logger,
 			log.Error("observation dropped: key not declared in manifest", "module", src.Module, "key", o.Key)
 			continue
 		}
+		target, err := targetOf(src, attr, o.Entity)
+		if err != nil {
+			log.Error("observation dropped: wrong entity", "module", src.Module, "key", o.Key, "error", err)
+			continue
+		}
+		if !target.IsHost() {
+			if kerr := identity.ValidKey(target.Key); kerr != nil {
+				badKeys = append(badKeys, o.Key+": "+kerr.Error())
+				continue
+			}
+		}
 		v, err := Validate(attr, o.Value)
 		if err != nil {
 			log.Error("observation dropped: invalid value", "module", src.Module, "key", o.Key, "error", err)
 			continue
 		}
-		buf.Add(Sample{Module: src.Module, Key: o.Key, Slug: attr.Slug, Kind: attr.Kind, Value: v, At: at})
+		buf.Add(Sample{Module: src.Module, Key: o.Key, Slug: attr.Slug, Kind: attr.Kind, Value: v, At: at, Target: target})
 		kept++
+	}
+	if len(badKeys) > 0 {
+		// One record per collection, never the key itself (spec 011 FR-008).
+		log.Error("observations dropped: invalid entity key", "module", src.Module, "count", len(badKeys), "reasons", strings.Join(badKeys, "; "))
 	}
 	log.Debug("collected", "module", src.Module, "observations", kept, "at", at)
 	return nil
+}
+
+// targetOf checks that an observation names the entity its attribute belongs
+// to and returns that entity (spec 011 FR-006).
+func targetOf(src Source, attr manifest.DesiredAttribute, e module.Entity) (Target, error) {
+	switch {
+	case e.IsHost() && attr.EntityTemplate == "":
+		return Target{}, nil
+	case e.IsHost():
+		return Target{}, fmt.Errorf("attribute belongs to entity template %q but the observation names no entity", attr.EntityTemplate)
+	case e.Template != attr.EntityTemplate:
+		return Target{}, fmt.Errorf("observation names template %q but the attribute belongs to %q", e.Template, describeTemplate(attr.EntityTemplate))
+	}
+	return Target{Module: src.Module, Template: src.Entities[e.Template], Key: e.Key}, nil
+}
+
+func describeTemplate(t string) string {
+	if t == "" {
+		return "the host"
+	}
+	return t
 }
 
 // safeCollect calls the provider and turns a panic into an error so that a
@@ -245,7 +306,7 @@ func withDeadline(ctx context.Context, clock Clock, d time.Duration) (context.Co
 
 // Once collects every source exactly once, concurrently, and returns the
 // names of the modules whose collection failed, sorted (FR-018 one-shot).
-func Once(ctx context.Context, sources []Source, buf *Buffer, clock Clock, log *slog.Logger) []string {
+func Once(ctx context.Context, sources []Source, buf Sink, clock Clock, log *slog.Logger) []string {
 	if clock == nil {
 		clock = RealClock{}
 	}

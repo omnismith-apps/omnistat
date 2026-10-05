@@ -20,6 +20,8 @@ type identityReport struct {
 	Project     bool     `json:"project_checked"`
 	SchemaOK    bool     `json:"schema_ok"`
 	EntityID    string   `json:"entity_id,omitempty"`
+	Outcome     string   `json:"outcome,omitempty"`
+	OtherKey    string   `json:"other_key,omitempty"`
 	WouldCreate bool     `json:"would_create"`
 	Duplicates  []string `json:"duplicates,omitempty"`
 	Error       string   `json:"error,omitempty"`
@@ -91,11 +93,12 @@ func (a *App) resolveDryRun(e env, s config.Settings, id machineid.Identity, rep
 		return err
 	}
 	rep.SchemaOK = true
-	h, err := identity.Resolve(e.ctx, p.api, target, id.Value, true, e.log)
+	h, err := identity.ResolveHost(e.ctx, p.api, target, id.Value, true, e.log)
 	if err != nil {
 		return explain(err)
 	}
 	rep.EntityID, rep.WouldCreate, rep.Duplicates = h.EntityID, h.WouldCreate, h.Duplicates
+	rep.Outcome, rep.OtherKey = string(h.Outcome), h.OtherKey
 	return nil
 }
 
@@ -133,7 +136,15 @@ func (a *App) printIdentity(e env, rep identityReport, asJSON bool) int {
 		case rep.WouldCreate:
 			fmt.Fprintf(e.stdout, "entity:   none yet — the first run will create one\n")
 		default:
-			fmt.Fprintf(e.stdout, "entity:   %s\n", rep.EntityID)
+			// spec 011 FR-012, FR-020: how the host is found by its key.
+			switch identity.Outcome(rep.Outcome) {
+			case identity.WouldAdopt:
+				fmt.Fprintf(e.stdout, "entity:   %s (created before external keys; the next run gives it its key)\n", rep.EntityID)
+			case identity.AdoptedOtherKey:
+				fmt.Fprintf(e.stdout, "entity:   %s (holds the external key %q, left unchanged)\n", rep.EntityID, rep.OtherKey)
+			default:
+				fmt.Fprintf(e.stdout, "entity:   %s\n", rep.EntityID)
+			}
 			if len(rep.Duplicates) > 1 {
 				fmt.Fprintf(e.stdout, "warning:  %d entities carry this identity: %v (using the oldest)\n", len(rep.Duplicates), rep.Duplicates)
 			}

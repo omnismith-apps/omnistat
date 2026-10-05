@@ -19,8 +19,9 @@ const (
 )
 
 // Kind is the semantic kind of an attribute as a module declares it. Only the
-// kinds omnistat can publish are allowed (FR-005): references, files, images
-// and markdown are not.
+// kinds omnistat can publish are allowed (FR-005): files, images and markdown
+// are not. A reference is allowed only as the host link of an entity template
+// (spec 011 FR-002).
 type Kind string
 
 const (
@@ -31,12 +32,15 @@ const (
 	KindDatetime Kind = "datetime"
 	KindList     Kind = "list"
 	KindMetric   Kind = "metric"
+	// KindReference links a record to another; only an entity template's host
+	// link uses it (spec 011 FR-001, FR-002).
+	KindReference Kind = "reference"
 )
 
 // Valid reports whether k is a kind a manifest may declare.
 func (k Kind) Valid() bool {
 	switch k {
-	case KindText, KindNumber, KindBoolean, KindDate, KindDatetime, KindList, KindMetric:
+	case KindText, KindNumber, KindBoolean, KindDate, KindDatetime, KindList, KindMetric, KindReference:
 		return true
 	}
 	return false
@@ -44,7 +48,7 @@ func (k Kind) Valid() bool {
 
 // Kinds lists the valid kinds in a stable order (for messages and docs).
 func Kinds() []Kind {
-	return []Kind{KindText, KindNumber, KindBoolean, KindDate, KindDatetime, KindList, KindMetric}
+	return []Kind{KindText, KindNumber, KindBoolean, KindDate, KindDatetime, KindList, KindMetric, KindReference}
 }
 
 // Manifest is a module's schema contract (FR-001).
@@ -64,6 +68,12 @@ type Template struct {
 	Slug        string
 	Name        string
 	Description string
+	// Entity marks an entity template (spec 011 FR-001): the module publishes
+	// its attributes on that template to records of their own, identified by
+	// external key and linked to the host by the one reference attribute the
+	// module attaches to it. Its manifest slug is the name the provider uses
+	// to target it, whatever the operator remaps it to.
+	Entity bool
 }
 
 // Attribute is one attribute a module owns.
@@ -80,6 +90,14 @@ type Attribute struct {
 	Options []string
 	// Template is the slug of the template to attach to; empty means host.
 	Template string
+	// Target is the template a reference points to. Only HostTemplate (the
+	// host template, after overrides) is accepted, and only for references
+	// (spec 011 FR-002).
+	Target string
+	// Label ranks the attribute as its template's human-readable label: the
+	// highest-ranked label bound to the host template is what a host link
+	// displays (spec 011 FR-003). Zero is not a label.
+	Label int
 	// Platforms are the GOOS values on which this attribute can be
 	// collected (ADR-0007). Empty means every platform. It never affects
 	// the desired schema — an attribute is declared everywhere and merely

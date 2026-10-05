@@ -126,6 +126,11 @@ entity it resolves to, so that I can verify before the first apply and debug lat
 ### Entity resolution
 - **FR-010** The core MUST resolve the host entity by searching the host template for
   entities whose identity attribute equals the identity value (exact match).
+  *(Superseded 2026-10-05 by spec 011 FR-011/FR-012, ADR-0014: the host entity is found by
+  its platform external key, which equals the identity, then created by upsert by key.
+  This search by the identity attribute remains only to adopt host entities created
+  before keys existed. FR-011 and FR-013 apply to that adoption. FR-012's create and
+  re-search is replaced by the upsert, which cannot create a duplicate.)*
 - **FR-011** If exactly one entity matches, it is the host entity.
 - **FR-012** If none matches, the core MUST create one entity on the host template with
   the identity attribute set, and MUST then re-search; if the re-search finds more than

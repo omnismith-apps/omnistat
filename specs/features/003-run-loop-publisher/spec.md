@@ -175,6 +175,8 @@ recognise hosts in Omnismith (the identity is an opaque token, 002 US-4).
   backfilled value with its FR-006 timestamp, and one or more metric ingestions carrying
   the buffered observations in chunks of at most 1 000, each with its FR-006 timestamp.
   A publish with an empty buffer MUST make no request.
+  *(Amended 2026-10-05 by spec 011 FR-016/FR-017: the same applies to each module-owned
+  entity, published after the host.)*
 - **FR-012a** A `list` observation MUST be published as the identifier of the list item
   whose value equals the observed option (exact, case-sensitive — 001 FR-016), taken
   from the identifiers resolved at startup (001 FR-025). An option that has no item in

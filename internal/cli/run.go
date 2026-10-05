@@ -11,6 +11,7 @@ import (
 	"github.com/omnismith-apps/omnistat/internal/collect"
 	"github.com/omnismith-apps/omnistat/internal/config"
 	"github.com/omnismith-apps/omnistat/internal/identity"
+	"github.com/omnismith-apps/omnistat/internal/manifest"
 	"github.com/omnismith-apps/omnistat/internal/module/machineid"
 	"github.com/omnismith-apps/omnistat/internal/publish"
 	"github.com/omnismith-apps/omnistat/internal/schema"
@@ -82,8 +83,17 @@ func (a *App) run(e env, args []string) int {
 		pub.PendingOptions = schema.Diff(p.desired, p.current).PendingOptions()
 		printSkipped(e, skipped, a.goos(), *asJSON)
 	}
-	buf := collect.NewBuffer(a.MaxPerMetric)
-	l := &loop{env: e, clock: clock, buf: buf, pub: pub, sources: sources, interval: p.settings.PublishInterval, timeout: p.settings.HTTP.Timeout,
+	// Module-owned entities are resolved when first published (spec 011
+	// FR-010), linked to the host by each entity template's host link.
+	links := hostLinks(p.desired)
+	ents := &publish.Entities{
+		Host:     pub,
+		Resolver: &identity.Keyed{API: p.api, HostID: host.EntityID, HostLink: links, DryRun: *dryRun, Log: e.log},
+		HostLink: links,
+		Log:      e.log,
+	}
+	bufs := collect.NewBuffers(a.MaxPerMetric, e.log)
+	l := &loop{env: e, clock: clock, bufs: bufs, ents: ents, sources: sources, interval: p.settings.PublishInterval, timeout: p.settings.HTTP.Timeout,
 		daemonMode: *daemon, notify: *daemon && !*dryRun, summaryEvery: p.settings.Log.SummaryInterval}
 	if *daemon {
 		if l.notify {
@@ -146,11 +156,26 @@ func (a *App) resolveHost(e env, p prepared, resolved schema.Resolved, dryRun bo
 		}
 		return identity.Host{}, err
 	}
-	h, err := identity.Resolve(e.ctx, p.api, target, id.Value, dryRun, e.log)
+	h, err := identity.ResolveHost(e.ctx, p.api, target, id.Value, dryRun, e.log)
 	if err != nil {
 		return identity.Host{}, explain(err)
 	}
 	return h, nil
+}
+
+// hostLinks maps every entity template's resolved slug to its host link's
+// slug (spec 011 FR-001, FR-018).
+func hostLinks(d manifest.Desired) map[string]string {
+	out := map[string]string{}
+	for _, t := range d.Templates {
+		if !t.Entity {
+			continue
+		}
+		if link, ok := d.HostLink(t.Slug); ok {
+			out[t.Slug] = link.Slug
+		}
+	}
+	return out
 }
 
 // stopMargin is what the daemon asks systemd for on top of the HTTP timeout
@@ -161,8 +186,8 @@ const stopMargin = 5 * time.Second
 type loop struct {
 	env      env
 	clock    collect.Clock
-	buf      *collect.Buffer
-	pub      *publish.Publisher
+	bufs     *collect.Buffers
+	ents     *publish.Entities
 	sources  []collect.Source
 	interval time.Duration
 	timeout  time.Duration
@@ -183,6 +208,7 @@ type loop struct {
 type publishStats struct {
 	since                                       time.Time
 	publishes, failed, dims, obs, reqs, dropped int
+	entities, entitiesFailed                    int
 	maxDuration                                 time.Duration
 }
 
@@ -196,6 +222,8 @@ func (st *publishStats) add(res publish.Result, d time.Duration, failed bool) {
 	st.obs += res.Observations
 	st.reqs += res.Requests
 	st.dropped += res.Dropped
+	st.entities += res.Entities
+	st.entitiesFailed += res.EntitiesFailed
 	st.maxDuration = max(st.maxDuration, d)
 }
 
@@ -215,22 +243,36 @@ func (l *loop) summarize(final bool) {
 	}
 	st := l.stats
 	l.env.log.Info("publish summary", "period", period, "publishes", st.publishes, "dimensions", st.dims, "observations", st.obs,
-		"requests", st.reqs, "dropped", st.dropped, "failed", st.failed, "max_duration", st.maxDuration)
+		"requests", st.reqs, "dropped", st.dropped, "failed", st.failed, "entities", st.entities, "entities_failed", st.entitiesFailed,
+		"max_duration", st.maxDuration)
 	l.stats = publishStats{since: now}
 }
 
 // once collects every module one time and publishes (FR-018).
 func (l *loop) once(dryRun bool) int {
-	failed := collect.Once(l.env.ctx, l.sources, l.buf, l.clock, l.env.log)
+	failed := collect.Once(l.env.ctx, l.sources, l.bufs, l.clock, l.env.log)
 	res, err := l.publish(l.env.ctx)
 	if err != nil {
 		return fail(l.env, err)
 	}
 	if !dryRun {
-		fmt.Fprintf(l.env.stdout, "published %d dimensions, %d observations to entity %s\n", res.Dimensions, res.Observations, l.pub.EntityID)
+		fmt.Fprintf(l.env.stdout, "published %d dimensions, %d observations to entity %s", res.Dimensions, res.Observations, l.ents.Host.EntityID)
+		if res.Entities > 0 {
+			fmt.Fprintf(l.env.stdout, " and %d module entities", res.Entities)
+		}
+		fmt.Fprintln(l.env.stdout)
 	}
+	partial := false
 	if len(failed) > 0 {
 		fmt.Fprintf(l.env.stderr, "omnistat: %d module(s) failed to collect: %s\n", len(failed), strings.Join(failed, ", "))
+		partial = true
+	}
+	if res.EntitiesFailed > 0 {
+		// spec 011 FR-021: an entity not written is a partial run.
+		fmt.Fprintf(l.env.stderr, "omnistat: %d module entities were not written\n", res.EntitiesFailed)
+		partial = true
+	}
+	if partial {
 		return ExitPartial
 	}
 	return ExitOK
@@ -241,7 +283,7 @@ func (l *loop) once(dryRun bool) int {
 func (l *loop) daemon() int {
 	ctx := l.env.ctx
 	sctx, cancel := context.WithCancel(ctx)
-	sched := collect.NewScheduler(l.sources, l.buf, l.clock, l.env.log)
+	sched := collect.NewScheduler(l.sources, l.bufs, l.clock, l.env.log)
 	go sched.Run(sctx)
 	stop := func() {
 		cancel()
@@ -292,19 +334,24 @@ func (l *loop) daemon() int {
 // publish sends what is buffered, acks what was accepted and logs the
 // outcome (FR-009, FR-026).
 func (l *loop) publish(ctx context.Context) (publish.Result, error) {
-	for slug, n := range l.buf.Drops() {
-		l.env.log.Warn("metric buffer full; oldest observations dropped", "slug", slug, "dropped", n)
+	for _, d := range l.bufs.Drops() {
+		attrs := []any{"slug", d.Slug, "dropped", d.Dropped}
+		if !d.Target.IsHost() {
+			attrs = append(attrs, "module", d.Target.Module, "template", d.Target.Template, "key", d.Target.Key)
+		}
+		l.env.log.Warn("metric buffer full; oldest observations dropped", attrs...)
 	}
-	batch := l.buf.Snapshot()
-	if batch.Empty() {
+	if l.bufs.Empty() {
 		l.env.log.Debug("nothing to publish")
 		return publish.Result{}, nil
 	}
 	started := l.clock.Now()
-	res, err := l.pub.Publish(ctx, batch)
-	l.buf.Ack(batch, res.Ack)
+	res, err := l.ents.Publish(ctx, l.bufs)
 	took := l.clock.Now().Sub(started)
 	attrs := []any{"dimensions", res.Dimensions, "observations", res.Observations, "requests", res.Requests, "dropped", res.Dropped, "duration", took}
+	if res.Entities+res.EntitiesFailed > 0 {
+		attrs = append(attrs, "entities", res.Entities, "entities_failed", res.EntitiesFailed)
+	}
 	l.stats.add(res, took, err != nil)
 	if err != nil {
 		l.env.log.Error("publish failed", append(attrs, "error", err)...)

@@ -72,9 +72,13 @@ type Server struct {
 	// (AddEntity, AddTemplate, …) is visible at once.
 	SearchLag int
 	SchemaLag int
-	searches  int
-	schemaRd  int
-	pending   []pendingSchema
+	// UpsertRace makes the next UpsertRace upserts by key answer 409, as the
+	// platform does when a concurrent write took the key and its own retry
+	// could not run (spec 011 FR-011).
+	UpsertRace int
+	searches   int
+	schemaRd   int
+	pending    []pendingSchema
 }
 
 // pendingSchema is the discovery document as it was before a schema write
@@ -93,6 +97,9 @@ type attribute struct {
 	ID, Slug, Name, Description string
 	AttributeType, DataType     int
 	Options                     []listItem
+	// RefTemplateID and RefAttributeID are a reference's target template and
+	// display attribute (spec 011 FR-003).
+	RefTemplateID, RefAttributeID string
 }
 
 type listItem struct{ ID, Value string }
@@ -107,6 +114,9 @@ type entity struct {
 	Metrics map[string][]Observation
 	// hiddenUntil is the last search that does not see the entity (SearchLag).
 	hiddenUntil int
+	// ExternalKey is the key another system identifies the record by; unique
+	// among the live records of a template (spec 011 FR-007).
+	ExternalKey string
 }
 
 // Write is one recorded dimension write.
@@ -134,6 +144,23 @@ func (s *Server) Requests() []Request {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]Request(nil), s.requests...)
+}
+
+// TemplateID returns the id of the template with the given slug, or "".
+func (s *Server) TemplateID(slug string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t := s.tplBySlug(slug); t != nil {
+		return t.ID
+	}
+	return ""
+}
+
+// ResetRequests forgets the requests recorded so far.
+func (s *Server) ResetRequests() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requests = nil
 }
 
 // FailNext queues a fault.
@@ -186,6 +213,40 @@ func (s *Server) AddAttribute(slug, typ string, options ...string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.addAttributeLocked(slug, typ, options)
+}
+
+// AddReference seeds a reference attribute pointing at targetTemplate (by
+// slug), shown by displayAttr (by slug), and returns its id.
+func (s *Server) AddReference(slug, targetTemplate, displayAttr string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := s.addAttributeLocked(slug, "reference", nil)
+	a := s.attrByID(id)
+	if t := s.tplBySlug(targetTemplate); t != nil {
+		a.RefTemplateID = t.ID
+	}
+	if d := s.attrBySlug(displayAttr); d != nil {
+		a.RefAttributeID = d.ID
+	}
+	return id
+}
+
+// AttributeReference returns a reference attribute's target template and
+// display attribute slugs.
+func (s *Server) AttributeReference(slug string) (target, display string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a := s.attrBySlug(slug)
+	if a == nil {
+		return "", ""
+	}
+	if t := s.tplByID(a.RefTemplateID); t != nil {
+		target = t.Slug
+	}
+	if d := s.attrByID(a.RefAttributeID); d != nil {
+		display = d.Slug
+	}
+	return target, display
 }
 
 // AddAttributeLocked is AddAttribute for use inside Before hooks.
@@ -332,6 +393,13 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.patchAttribute(w, strings.TrimPrefix(path, "/attributes/"), body)
 	case r.Method == "POST" && strings.HasPrefix(path, "/entities/search/"):
 		s.searchEntities(w, strings.TrimPrefix(path, "/entities/search/"), body)
+	case (r.Method == "GET" || r.Method == "PUT") && strings.HasPrefix(path, "/entities/template/") && strings.HasSuffix(path, "/by-key"):
+		ref := strings.TrimSuffix(strings.TrimPrefix(path, "/entities/template/"), "/by-key")
+		if r.Method == "GET" {
+			s.entityByKey(w, ref, r.URL.Query())
+		} else {
+			s.upsertByKey(w, ref, body)
+		}
 	case r.Method == "POST" && strings.HasPrefix(path, "/entities/template/"):
 		s.createEntity(w, strings.TrimPrefix(path, "/entities/template/"), body)
 	case r.Method == "POST" && strings.HasPrefix(path, "/entities/") && strings.HasSuffix(path, "/metrics"):
@@ -389,6 +457,13 @@ func (s *Server) schemaDoc() map[string]any {
 	attrs := []map[string]any{}
 	for _, a := range s.attributes {
 		m := map[string]any{"id": a.ID, "slug": a.Slug, "name": a.Name, "type": enumsToType(a.AttributeType, a.DataType), "description": a.Description}
+		if a.AttributeType == 3 {
+			ref := map[string]any{"target_template_id": a.RefTemplateID, "target_attribute_id": a.RefAttributeID}
+			if t := s.tplByID(a.RefTemplateID); t != nil {
+				ref["target_template_slug"] = t.Slug
+			}
+			m["reference"] = ref
+		}
 		if a.AttributeType == 2 {
 			opts := []map[string]any{}
 			for _, o := range a.Options {
@@ -443,6 +518,10 @@ func (s *Server) createAttribute(w http.ResponseWriter, body []byte) {
 		AttributeType *int     `json:"attribute_type"`
 		DataType      *int     `json:"data_type"`
 		TemplateIDs   []string `json:"template_ids"`
+		Reference     *struct {
+			TargetTemplateID  string `json:"target_template_id"`
+			TargetAttributeID string `json:"target_attribute_id"`
+		} `json:"reference_config"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil || req.Name == "" || req.AttributeType == nil || req.DataType == nil {
 		problem(w, 400, "Bad Request", "invalid payload", "")
@@ -462,7 +541,17 @@ func (s *Server) createAttribute(w http.ResponseWriter, body []byte) {
 			return
 		}
 	}
+	if *req.AttributeType == 3 {
+		// The platform requires both ids of a reference (api-ng CreateAttribute).
+		if req.Reference == nil || s.tplByID(req.Reference.TargetTemplateID) == nil || s.attrByID(req.Reference.TargetAttributeID) == nil {
+			validation(w, map[string][]string{"reference_config": {"A reference needs an existing target template and display attribute."}})
+			return
+		}
+	}
 	a := &attribute{ID: s.id(), Slug: slug, Name: req.Name, AttributeType: *req.AttributeType, DataType: *req.DataType}
+	if req.Reference != nil {
+		a.RefTemplateID, a.RefAttributeID = req.Reference.TargetTemplateID, req.Reference.TargetAttributeID
+	}
 	if req.Description != nil {
 		a.Description = *req.Description
 	}

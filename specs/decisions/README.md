@@ -18,5 +18,6 @@ Numbered `NNNN-kebab-title.md`; never edit a decision after acceptance — super
 | [0011](0011-windows-service-security-model.md) | The Windows service's security model | accepted |
 | [0012](0012-linux-service-security-model.md) | The Linux service's security model | accepted |
 | [0013](0013-self-upgrade-trust-model.md) | Where `omnistat upgrade` gets a binary, and what it trusts | accepted |
+| [0014](0014-entities-are-identified-by-external-key.md) | Entities are identified by the platform's external key; modules may own entities | accepted |
 
 Start from `../templates/adr.md`.

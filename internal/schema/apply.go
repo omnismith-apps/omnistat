@@ -200,7 +200,15 @@ func execute(ctx context.Context, api API, a Action, r *Resolved) error {
 			}
 			ids = append(ids, id)
 		}
-		id, err := api.CreateAttribute(ctx, CreateAttributeParams{Slug: a.Attribute, Name: a.Name, Description: a.Description, Kind: a.Kind, TemplateIDs: ids})
+		params := CreateAttributeParams{Slug: a.Attribute, Name: a.Name, Description: a.Description, Kind: a.Kind, TemplateIDs: ids}
+		if a.Kind == manifest.KindReference {
+			params.RefTemplateID = r.Templates[a.Target]
+			params.RefDisplayID = r.Attributes[a.Display]
+			if params.RefTemplateID == "" || params.RefDisplayID == "" {
+				return fmt.Errorf("reference %q: target template %q or display attribute %q has no id yet (plan order violated)", a.Attribute, a.Target, a.Display)
+			}
+		}
+		id, err := api.CreateAttribute(ctx, params)
 		if err != nil {
 			return err
 		}

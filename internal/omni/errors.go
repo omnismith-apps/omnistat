@@ -10,6 +10,7 @@ import (
 
 	omnismithsdk "github.com/omnismith-sdk/go"
 
+	"github.com/omnismith-apps/omnistat/internal/identity"
 	"github.com/omnismith-apps/omnistat/internal/publish"
 	"github.com/omnismith-apps/omnistat/internal/schema"
 )
@@ -81,6 +82,8 @@ func (e *APIError) Is(target error) bool {
 		return e.Status == http.StatusUnprocessableEntity
 	case schema.ErrAlreadyExists:
 		return e.alreadyExists()
+	case identity.ErrKeyTaken:
+		return e.Status == http.StatusConflict && e.Code != "no_project_selected"
 	}
 	return false
 }

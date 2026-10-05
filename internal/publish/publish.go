@@ -21,10 +21,17 @@ const ChunkSize = 1000
 // must end so that the next one recreates it (FR-015, US-3/3).
 var ErrEntityGone = errors.New("host entity no longer exists")
 
-// Publisher sends batches to one host entity.
+// Publisher sends batches to one entity: the host, or a module-owned entity
+// (spec 011).
 type Publisher struct {
 	API      API
 	EntityID string
+	// Entity labels a module-owned entity for the dry-run printer; nil for
+	// the host.
+	Entity *EntityLabel
+	// HostLink, when set, is written with every dimension update: a module
+	// entity's reference to the host (spec 011 FR-018).
+	HostLink *HostLink
 	// ListItems maps attribute slug → option value → list item id (FR-012a).
 	ListItems map[string]map[string]string
 	// PendingOptions (dry-run only, with Printer) are list options the schema
@@ -44,6 +51,10 @@ type Result struct {
 	Observations int
 	Requests     int
 	Dropped      int
+	// Entities and EntitiesFailed count the module-owned entities written
+	// and not written (spec 011 FR-023).
+	Entities       int
+	EntitiesFailed int
 }
 
 // Publish sends a batch: at most one dimension update, then metric chunks
@@ -78,6 +89,22 @@ func (p *Publisher) Publish(ctx context.Context, b collect.Batch) (Result, error
 		dims[s.Slug] = Backfill{Value: v, At: s.At}
 		dimLines = append(dimLines, Line{Module: s.Module, Key: s.Key, Slug: s.Slug, Value: v, At: s.At})
 	}
+	if p.HostLink != nil && len(dims) > 0 {
+		// The newest dimension's instant: the link is as current as the
+		// values it accompanies.
+		var at time.Time
+		for _, d := range dims {
+			if d.At.After(at) {
+				at = d.At
+			}
+		}
+		value := p.HostLink.EntityID
+		dims[p.HostLink.Slug] = Backfill{Value: value, At: at}
+		if value == "" {
+			value = "(host entity to be created)"
+		}
+		dimLines = append(dimLines, Line{Module: p.HostLink.Module, Key: "(host link)", Slug: p.HostLink.Slug, Value: value, At: at})
+	}
 	// Metrics: render all, then chunk.
 	var metrics []Metric
 	var metricLines []Line
@@ -94,7 +121,7 @@ func (p *Publisher) Publish(ctx context.Context, b collect.Batch) (Result, error
 	}
 
 	if p.Printer != nil {
-		p.Printer.Print(p.EntityID, dimLines, metricLines)
+		p.Printer.Print(p.destination(), dimLines, metricLines)
 		for slug := range dims {
 			res.Ack.Dims = append(res.Ack.Dims, slug)
 		}
@@ -137,6 +164,29 @@ func (p *Publisher) Publish(ctx context.Context, b collect.Batch) (Result, error
 		}
 	}
 	return res, nil
+}
+
+// EntityLabel names a module-owned entity for the dry-run (spec 011 FR-020).
+type EntityLabel struct {
+	Module, Template, Key string
+	// WouldCreate: the entity does not exist yet.
+	WouldCreate bool
+}
+
+// HostLink is the host link attribute of a module entity and the host
+// entity it points to (spec 011 FR-018).
+type HostLink struct {
+	Module   string
+	Slug     string
+	EntityID string
+}
+
+func (p *Publisher) destination() Destination {
+	d := Destination{EntityID: p.EntityID}
+	if p.Entity != nil {
+		d.Module, d.Template, d.Key, d.WouldCreate = p.Entity.Module, p.Entity.Template, p.Entity.Key, p.Entity.WouldCreate
+	}
+	return d
 }
 
 type dimResult struct {

@@ -46,4 +46,8 @@ type CreateAttributeParams struct {
 	Description string
 	Kind        manifest.Kind
 	TemplateIDs []string
+	// RefTemplateID and RefDisplayID are a reference's target template and
+	// display attribute (spec 011 FR-003); empty for other kinds.
+	RefTemplateID string
+	RefDisplayID  string
 }

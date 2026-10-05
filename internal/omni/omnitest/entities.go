@@ -15,6 +15,7 @@ type EntitySnapshot struct {
 	ID, TemplateSlug string
 	Values           map[string]any
 	CreatedAt        string
+	ExternalKey      string
 }
 
 // AddEntity seeds an entity on the given template (by slug) and returns its id.
@@ -49,7 +50,7 @@ func (s *Server) Entities() []EntitySnapshot {
 	defer s.mu.Unlock()
 	var out []EntitySnapshot
 	for _, e := range s.entities {
-		snap := EntitySnapshot{ID: e.ID, Values: e.Values, CreatedAt: e.CreatedAt}
+		snap := EntitySnapshot{ID: e.ID, Values: e.Values, CreatedAt: e.CreatedAt, ExternalKey: e.ExternalKey}
 		if t := s.tplByID(e.TemplateID); t != nil {
 			snap.TemplateSlug = t.Slug
 		}
@@ -105,10 +106,14 @@ func (s *Server) searchEntities(w http.ResponseWriter, templateID string, body [
 	sort.SliceStable(matches, func(i, j int) bool { return matches[i].CreatedAt < matches[j].CreatedAt })
 	data := []map[string]any{}
 	for _, e := range matches {
-		data = append(data, map[string]any{
+		rec := map[string]any{
 			"id": e.ID, "template_id": e.TemplateID, "template_slug": t.Slug,
 			"created_at": e.CreatedAt, "updated_at": e.CreatedAt, "attribute_values": e.Values,
-		})
+		}
+		if e.ExternalKey != "" {
+			rec["external_key"] = e.ExternalKey
+		}
+		data = append(data, rec)
 	}
 	writeJSON(w, 200, map[string]any{"data": data, "total": len(data), "limit": 50, "offset": 0})
 }
@@ -123,17 +128,37 @@ func (s *Server) createEntity(w http.ResponseWriter, templateRef string, body []
 		return
 	}
 	var req struct {
-		Attributes map[string]any `json:"attributes"`
+		Attributes  map[string]any `json:"attributes"`
+		ExternalKey *string        `json:"external_key"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		problem(w, 400, "Bad Request", "invalid payload", "")
 		return
 	}
-	for slug := range req.Attributes {
+	if !s.attributesOnTemplate(w, t, req.Attributes) {
+		return
+	}
+	if req.ExternalKey != nil && s.liveByKey(t.ID, *req.ExternalKey) != nil {
+		problem(w, 409, "Conflict", "external_key is held by another live record", "")
+		return
+	}
+	id := s.addEntityLocked(t.Slug, req.Attributes, "")
+	e := s.entityByID(id)
+	e.hiddenUntil = s.searches + s.SearchLag // SearchLag: not searchable yet
+	if req.ExternalKey != nil {
+		e.ExternalKey = *req.ExternalKey
+	}
+	writeJSON(w, 201, map[string]any{"id": id})
+}
+
+// attributesOnTemplate answers 422 unless every attribute exists and belongs
+// to the template.
+func (s *Server) attributesOnTemplate(w http.ResponseWriter, t *template, attrs map[string]any) bool {
+	for slug := range attrs {
 		a := s.attrBySlug(slug)
 		if a == nil {
 			validation(w, map[string][]string{"attributes." + slug: {"Unknown attribute."}})
-			return
+			return false
 		}
 		bound := false
 		for _, id := range t.AttributeIDs {
@@ -143,12 +168,122 @@ func (s *Server) createEntity(w http.ResponseWriter, templateRef string, body []
 		}
 		if !bound {
 			validation(w, map[string][]string{"attributes." + slug: {"Attribute does not belong to the template."}})
+			return false
+		}
+	}
+	return true
+}
+
+// liveByKey is the live record of a template holding key: the platform's
+// partial unique index (spec 011 FR-007).
+func (s *Server) liveByKey(templateID, key string) *entity {
+	for _, e := range s.entities {
+		if e.TemplateID == templateID && e.ExternalKey == key && key != "" {
+			return e
+		}
+	}
+	return nil
+}
+
+func (s *Server) tplByRef(ref string) *template {
+	if t := s.tplBySlug(ref); t != nil {
+		return t
+	}
+	return s.tplByID(ref)
+}
+
+// entityByKey is GET /entities/template/{t}/by-key?key=: the live record
+// holding the key, read like GET /entities/{id}; 404 when none does. Like
+// the platform, it reads the record itself and does not lag.
+func (s *Server) entityByKey(w http.ResponseWriter, templateRef string, q url.Values) {
+	t := s.tplByRef(templateRef)
+	if t == nil {
+		problem(w, 404, "Not Found", "template not found", "")
+		return
+	}
+	e := s.liveByKey(t.ID, q.Get("key"))
+	if e == nil {
+		problem(w, 404, "Not Found", "no live record holds this key", "")
+		return
+	}
+	s.getEntity(w, e.ID, q)
+}
+
+// upsertByKey is PUT /entities/template/{t}/by-key: create the record with
+// the key (201), or partially update the live record holding it (200).
+func (s *Server) upsertByKey(w http.ResponseWriter, templateRef string, body []byte) {
+	t := s.tplByRef(templateRef)
+	if t == nil {
+		problem(w, 404, "Not Found", "template not found", "")
+		return
+	}
+	var req struct {
+		ExternalKey *string        `json:"external_key"`
+		Attributes  map[string]any `json:"attributes"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil || req.ExternalKey == nil || req.Attributes == nil {
+		problem(w, 400, "Bad Request", "external_key and attributes are required", "")
+		return
+	}
+	key := strings.TrimSpace(*req.ExternalKey)
+	if key == "" || len(key) > 255 {
+		validation(w, map[string][]string{"external_key": {"1–255 characters after trimming."}})
+		return
+	}
+	if s.UpsertRace > 0 {
+		s.UpsertRace--
+		problem(w, 409, "Conflict", "the key was taken by a concurrent write; send the request again", "")
+		return
+	}
+	if !s.attributesOnTemplate(w, t, req.Attributes) {
+		return
+	}
+	if e := s.liveByKey(t.ID, key); e != nil {
+		for slug, v := range req.Attributes {
+			e.Values[slug] = v
+			e.History = append(e.History, Write{Slug: slug, Value: v})
+		}
+		writeJSON(w, 200, map[string]any{"id": e.ID, "created": false})
+		return
+	}
+	values := map[string]any{}
+	for slug, v := range req.Attributes {
+		values[slug] = v
+	}
+	id := s.addEntityLocked(t.Slug, values, "")
+	e := s.entityByID(id)
+	e.ExternalKey = key
+	e.hiddenUntil = s.searches + s.SearchLag // search lags; the key does not
+	writeJSON(w, 201, map[string]any{"id": id, "created": true})
+}
+
+// DeleteEntity removes an entity, as a user deleting it in Omnismith would; a
+// deleted record releases its key.
+func (s *Server) DeleteEntity(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, e := range s.entities {
+		if e.ID == id {
+			s.entities = append(s.entities[:i], s.entities[i+1:]...)
 			return
 		}
 	}
-	id := s.addEntityLocked(t.Slug, req.Attributes, "")
-	s.entityByID(id).hiddenUntil = s.searches + s.SearchLag // SearchLag: not searchable yet
-	writeJSON(w, 201, map[string]any{"id": id})
+}
+
+// SetEntityKey seeds an external key on an existing entity.
+func (s *Server) SetEntityKey(id, key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.entityByID(id); e != nil {
+		e.ExternalKey = key
+	}
+}
+
+// SetEntityKeyLocked is SetEntityKey for use inside Before hooks.
+func (s *Server) SetEntityKeyLocked(id, key string) {
+	if e := s.entityByID(id); e != nil {
+		e.ExternalKey = key
+	}
 }
 
 // EntityValues returns an entity's current dimension values (slug → value),
@@ -208,7 +343,7 @@ func (s *Server) getEntity(w http.ResponseWriter, id string, q url.Values) {
 		values = m
 	}
 	writeJSON(w, 200, map[string]any{
-		"id": e.ID, "template_id": e.TemplateID, "attribute_values": values,
+		"id": e.ID, "template_id": e.TemplateID, "attribute_values": values, "external_key": nullable(e.ExternalKey),
 		"list_item_ids": map[string]string{}, "reference_entity_ids": map[string]string{}, "file_ids": map[string]string{},
 	})
 }
@@ -258,11 +393,19 @@ func (s *Server) updateEntity(w http.ResponseWriter, id string, body []byte) {
 		return
 	}
 	var req struct {
-		Attributes map[string]json.RawMessage `json:"attributes"`
+		Attributes  map[string]json.RawMessage `json:"attributes"`
+		ExternalKey *string                    `json:"external_key"`
 	}
-	if err := json.Unmarshal(body, &req); err != nil || len(req.Attributes) == 0 {
-		problem(w, 400, "Bad Request", "attributes required", "")
+	if err := json.Unmarshal(body, &req); err != nil || (len(req.Attributes) == 0 && req.ExternalKey == nil) {
+		problem(w, 400, "Bad Request", "send attributes, external_key, or both", "")
 		return
+	}
+	if req.ExternalKey != nil {
+		if other := s.liveByKey(e.TemplateID, *req.ExternalKey); other != nil && other.ID != e.ID {
+			problem(w, 409, "Conflict", "external_key is held by another live record", "")
+			return
+		}
+		e.ExternalKey = *req.ExternalKey
 	}
 	errs := map[string][]string{}
 	writes := map[string]Write{}
@@ -357,4 +500,11 @@ func (s *Server) ingestMetrics(w http.ResponseWriter, id string, body []byte) {
 		e.Metrics[slug] = append(e.Metrics[slug], Observation{Value: mv.Value, UpdatedAt: at})
 	}
 	w.WriteHeader(202)
+}
+
+func nullable(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }

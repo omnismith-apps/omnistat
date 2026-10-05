@@ -36,6 +36,8 @@ type CurrentAttribute struct {
 	Options []string
 	// OptionIDs maps a list option's value to its item id (spec 003 FR-012a).
 	OptionIDs map[string]string
+	// RefTemplateID is the template a reference points to (spec 011 FR-004).
+	RefTemplateID string
 }
 
 // TypeOf maps a manifest kind to discovery's semantic type string (FR-014/015).
@@ -79,7 +81,8 @@ func (t ActionType) MarshalText() ([]byte, error) { return []byte(t.String()), n
 // Action is one step of a plan. Which fields are set depends on Type:
 //
 //   - CreateTemplate: Template, Name, Description
-//   - CreateAttribute: Attribute, Name, Description, Kind, Templates (slugs to bind at creation), Module
+//   - CreateAttribute: Attribute, Name, Description, Kind, Templates (slugs to bind at creation), Module;
+//     for a reference also Target and Display (spec 011 FR-003)
 //   - AddListOption: Attribute, AttributeID (empty until the attribute is created), Option, Module
 //   - BindAttribute: Attribute, AttributeID, Template, TemplateIDs (existing ∪ target), Module
 type Action struct {
@@ -91,6 +94,8 @@ type Action struct {
 	Kind        manifest.Kind `json:"kind,omitempty"`
 	Templates   []string      `json:"templates,omitempty"`
 	Option      string        `json:"option,omitempty"`
+	Target      string        `json:"target,omitempty"`
+	Display     string        `json:"display,omitempty"`
 	Module      string        `json:"module,omitempty"`
 	AttributeID string        `json:"-"`
 	TemplateIDs []string      `json:"-"`

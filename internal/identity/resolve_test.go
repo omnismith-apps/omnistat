@@ -2,7 +2,6 @@ package identity_test
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -36,110 +35,214 @@ func setup(t *testing.T) fixture {
 	return fixture{srv, c, identity.Target{TemplateSlug: "host", TemplateID: tid, AttributeSlug: "machine_id"}}
 }
 
-// US-1/1-2, FR-010…012, FR-014: none → create (identity only), then reuse.
-func TestResolve_CreateThenReuse(t *testing.T) {
+// requests counts the recorded requests by method and path prefix.
+func requests(srv *omnitest.Server) map[string]int {
+	out := map[string]int{}
+	for _, r := range srv.Requests() {
+		switch {
+		case strings.HasSuffix(r.Path, "/by-key"):
+			out[r.Method+" by-key"]++
+		case strings.HasPrefix(r.Path, "/entities/search/"):
+			out["search"]++
+		case r.Method == "PATCH":
+			out["patch"]++
+		default:
+			out[r.Method+" "+r.Path]++
+		}
+	}
+	return out
+}
+
+// spec 011 US-3/3, FR-011, NFR-001: a fresh project gets one host entity
+// holding its key, with machine_id set (002 FR-014); the next start finds it
+// with one lookup and writes nothing.
+func TestResolveHost_CreateThenFind(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 
-	h, err := identity.Resolve(ctx, f.api, f.target, "id-1", false, quiet)
+	h, err := identity.ResolveHost(ctx, f.api, f.target, "id-1", false, quiet)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !h.Created || h.EntityID == "" || h.Identity != "id-1" || len(h.Duplicates) != 0 {
+	if h.Outcome != identity.Created || !h.Created || h.EntityID == "" {
 		t.Fatalf("host: %+v", h)
 	}
 	ents := f.srv.Entities()
-	if len(ents) != 1 || ents[0].TemplateSlug != "host" || ents[0].Values["machine_id"] != "id-1" || len(ents[0].Values) != 1 {
+	if len(ents) != 1 || ents[0].ExternalKey != "id-1" || ents[0].Values["machine_id"] != "id-1" || len(ents[0].Values) != 1 {
 		t.Fatalf("entities: %+v", ents)
 	}
+	if got := requests(f.srv); got["GET by-key"] != 1 || got["search"] != 1 || got["PUT by-key"] != 1 {
+		t.Fatalf("fresh start requests: %v", got)
+	}
 
-	h2, err := identity.Resolve(ctx, f.api, f.target, "id-1", false, quiet)
-	if err != nil || h2.Created || h2.EntityID != h.EntityID {
-		t.Fatalf("reuse: %+v %v", h2, err)
+	f.srv.ResetRequests()
+	h2, err := identity.ResolveHost(ctx, f.api, f.target, "id-1", false, quiet)
+	if err != nil || h2.Outcome != identity.Found || h2.EntityID != h.EntityID {
+		t.Fatalf("find: %+v %v", h2, err)
 	}
-	if len(f.srv.Entities()) != 1 {
-		t.Fatal("second run must not create")
-	}
-	// exact match: a different identity is a different host
-	h3, err := identity.Resolve(ctx, f.api, f.target, "id-10", false, quiet)
-	if err != nil || !h3.Created || h3.EntityID == h.EntityID {
-		t.Fatalf("other identity: %+v %v", h3, err)
+	if got := requests(f.srv); len(got) != 1 || got["GET by-key"] != 1 {
+		t.Fatalf("a start that finds its host must make one lookup and no write: %v", got)
 	}
 }
 
-// FR-013 / US-3/2: duplicates → oldest wins, all reported, nothing created.
-func TestResolve_Duplicates(t *testing.T) {
+// spec 011 US-3/1, FR-012: a host entity from an earlier version (no key) is
+// adopted: it gets the key and no entity is created.
+func TestResolveHost_AdoptsLegacy(t *testing.T) {
 	f := setup(t)
-	newer := f.srv.AddEntity("host", map[string]any{"machine_id": "dup"}, "2026-09-20T10:00:00Z")
-	older := f.srv.AddEntity("host", map[string]any{"machine_id": "dup"}, "2026-09-19T10:00:00Z")
-	_ = f.srv.AddEntity("host", map[string]any{"machine_id": "unrelated"}, "2026-09-18T10:00:00Z")
-
-	h, err := identity.Resolve(context.Background(), f.api, f.target, "dup", false, quiet)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if h.Created || h.EntityID != older || strings.Join(h.Duplicates, ",") != older+","+newer {
-		t.Fatalf("host: %+v (older=%s newer=%s)", h, older, newer)
-	}
-	if len(f.srv.Entities()) != 3 {
-		t.Fatal("duplicates must not trigger a create")
-	}
-}
-
-// US-5, FR-017: dry-run resolves without writing.
-func TestResolve_DryRun(t *testing.T) {
-	f := setup(t)
-	h, err := identity.Resolve(context.Background(), f.api, f.target, "id-x", true, quiet)
-	if err != nil || h.EntityID != "" || !h.WouldCreate {
-		t.Fatalf("dry run: %+v %v", h, err)
-	}
-	if len(f.srv.Entities()) != 0 {
-		t.Fatal("dry run must not write")
-	}
-	id := f.srv.AddEntity("host", map[string]any{"machine_id": "id-x"}, "")
-	h, err = identity.Resolve(context.Background(), f.api, f.target, "id-x", true, quiet)
-	if err != nil || h.EntityID != id || h.WouldCreate {
-		t.Fatalf("dry run existing: %+v %v", h, err)
-	}
-}
-
-// FR-012: the create raced with another process → re-search picks it up
-// (and FR-013 if two now exist).
-func TestResolve_CreateRace(t *testing.T) {
-	f := setup(t)
-	var once sync.Once
-	f.srv.Before = func(r *http.Request) {
-		if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/entities/template/") {
-			once.Do(func() { f.srv.AddEntityLocked("host", map[string]any{"machine_id": "race"}, "2026-09-19T00:00:00Z") })
-		}
-	}
-	h, err := identity.Resolve(context.Background(), f.api, f.target, "race", false, quiet)
-	if err != nil {
-		t.Fatal(err)
+	legacy := f.srv.AddEntity("host", map[string]any{"machine_id": "id-1"}, "")
+	h, err := identity.ResolveHost(context.Background(), f.api, f.target, "id-1", false, quiet)
+	if err != nil || h.Outcome != identity.Adopted || h.EntityID != legacy {
+		t.Fatalf("adopt: %+v %v", h, err)
 	}
 	ents := f.srv.Entities()
-	if len(ents) != 2 || h.EntityID != ents[0].ID || len(h.Duplicates) != 2 {
-		t.Fatalf("host %+v entities %+v", h, ents)
+	if len(ents) != 1 || ents[0].ExternalKey != "id-1" {
+		t.Fatalf("entities: %+v", ents)
+	}
+	h2, err := identity.ResolveHost(context.Background(), f.api, f.target, "id-1", false, quiet)
+	if err != nil || h2.Outcome != identity.Found || h2.EntityID != legacy {
+		t.Fatalf("after adoption: %+v %v", h2, err)
 	}
 }
 
-// Errors are surfaced, never retried with a different payload (edge cases).
-func TestResolve_Errors(t *testing.T) {
+// spec 011 US-3/2: legacy duplicates → the oldest is adopted, the others are
+// listed and untouched.
+func TestResolveHost_AdoptsOldestDuplicate(t *testing.T) {
 	f := setup(t)
-	f.srv.FailNext(omnitest.Fault{Method: "POST", PathPrefix: "/entities/search/", Status: 500})
-	if _, err := identity.Resolve(context.Background(), f.api, f.target, "e", false, quiet); err == nil {
-		t.Fatal("search failure must surface")
+	newer := f.srv.AddEntity("host", map[string]any{"machine_id": "id-1"}, "2026-01-02T00:00:00Z")
+	older := f.srv.AddEntity("host", map[string]any{"machine_id": "id-1"}, "2026-01-01T00:00:00Z")
+	h, err := identity.ResolveHost(context.Background(), f.api, f.target, "id-1", false, quiet)
+	if err != nil || h.Outcome != identity.Adopted || h.EntityID != older {
+		t.Fatalf("adopt: %+v %v", h, err)
 	}
-	f.srv.FailNext(omnitest.Fault{Method: "POST", PathPrefix: "/entities/template/", Status: 422,
-		Body: `{"title":"Validation Failed","status":422,"errors":{"attributes.machine_id":["Nope."]}}`})
-	_, err := identity.Resolve(context.Background(), f.api, f.target, "e", false, quiet)
-	if !errors.Is(err, omni.ErrValidation) || !strings.Contains(err.Error(), "attributes.machine_id") {
-		t.Fatalf("422 must surface field errors: %v", err)
+	if len(h.Duplicates) != 2 || h.Duplicates[0] != older || h.Duplicates[1] != newer {
+		t.Fatalf("duplicates: %v", h.Duplicates)
 	}
-	if len(f.srv.Entities()) != 0 {
-		t.Fatal("nothing created")
+	for _, e := range f.srv.Entities() {
+		if e.ID == newer && e.ExternalKey != "" {
+			t.Fatalf("the newer duplicate was keyed: %+v", e)
+		}
 	}
-	if _, err := identity.Resolve(context.Background(), f.api, f.target, "", false, quiet); err == nil {
-		t.Fatal("empty identity must be rejected")
+}
+
+// spec 011 US-4/4, FR-012, NFR-003: an adopted entity that already holds
+// another key keeps it; omnistat uses the entity and warns.
+func TestResolveHost_NeverOverwritesAKey(t *testing.T) {
+	f := setup(t)
+	id := f.srv.AddEntity("host", map[string]any{"machine_id": "id-1"}, "")
+	f.srv.SetEntityKey(id, "proxmox:vm-101")
+	h, err := identity.ResolveHost(context.Background(), f.api, f.target, "id-1", false, quiet)
+	if err != nil || h.Outcome != identity.AdoptedOtherKey || h.EntityID != id || h.OtherKey != "proxmox:vm-101" {
+		t.Fatalf("adopt: %+v %v", h, err)
+	}
+	if e := f.srv.Entities()[0]; e.ExternalKey != "proxmox:vm-101" {
+		t.Fatalf("key overwritten: %+v", e)
+	}
+	if got := requests(f.srv); got["patch"] != 0 || got["PUT by-key"] != 0 {
+		t.Fatalf("writes made: %v", got)
+	}
+}
+
+// spec 011 FR-012: another record took the key between the search and the
+// adoption; that record is used.
+func TestResolveHost_AdoptionLosesTheKey(t *testing.T) {
+	f := setup(t)
+	f.srv.AddEntity("host", map[string]any{"machine_id": "id-1"}, "2026-01-01T00:00:00Z")
+	winner := f.srv.AddEntity("host", map[string]any{"machine_id": "other"}, "2026-01-02T00:00:00Z")
+	f.srv.Before = func(r *http.Request) {
+		if r.Method == "PATCH" {
+			f.srv.SetEntityKeyLocked(winner, "id-1")
+			f.srv.Before = nil
+		}
+	}
+	h, err := identity.ResolveHost(context.Background(), f.api, f.target, "id-1", false, quiet)
+	if err != nil || h.Outcome != identity.Found || h.EntityID != winner {
+		t.Fatalf("resolve: %+v %v", h, err)
+	}
+}
+
+// spec 011 FR-020, 002 FR-017: dry-run reports would-adopt and would-create
+// and writes nothing.
+func TestResolveHost_DryRun(t *testing.T) {
+	f := setup(t)
+	h, err := identity.ResolveHost(context.Background(), f.api, f.target, "id-1", true, quiet)
+	if err != nil || h.Outcome != identity.WouldCreate || !h.WouldCreate || h.EntityID != "" {
+		t.Fatalf("would create: %+v %v", h, err)
+	}
+	legacy := f.srv.AddEntity("host", map[string]any{"machine_id": "id-1"}, "")
+	h, err = identity.ResolveHost(context.Background(), f.api, f.target, "id-1", true, quiet)
+	if err != nil || h.Outcome != identity.WouldAdopt || h.EntityID != legacy {
+		t.Fatalf("would adopt: %+v %v", h, err)
+	}
+	if got := requests(f.srv); got["patch"] != 0 || got["PUT by-key"] != 0 {
+		t.Fatalf("dry-run wrote: %v", got)
+	}
+	if e := f.srv.Entities()[0]; e.ExternalKey != "" {
+		t.Fatalf("dry-run set a key: %+v", e)
+	}
+}
+
+// spec 011 US-1/3, FR-011: concurrent first starts end with exactly one
+// keyed host, whatever the interleaving.
+func TestResolveHost_ConcurrentFirstStarts(t *testing.T) {
+	f := setup(t)
+	const n = 8
+	ids := make([]string, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			h, err := identity.ResolveHost(context.Background(), f.api, f.target, "id-1", false, quiet)
+			ids[i], errs[i] = h.EntityID, err
+		}(i)
+	}
+	wg.Wait()
+	for i := range n {
+		if errs[i] != nil || ids[i] != ids[0] {
+			t.Fatalf("start %d: %s %v (first: %s)", i, ids[i], errs[i], ids[0])
+		}
+	}
+	if len(f.srv.Entities()) != 1 {
+		t.Fatalf("entities: %+v", f.srv.Entities())
+	}
+}
+
+// spec 011 FR-011: an upsert answered with a conflict is retried.
+func TestResolveHost_UpsertConflictRetried(t *testing.T) {
+	f := setup(t)
+	f.srv.UpsertRace = 2
+	h, err := identity.ResolveHost(context.Background(), f.api, f.target, "id-1", false, quiet)
+	if err != nil || h.Outcome != identity.Created {
+		t.Fatalf("resolve: %+v %v", h, err)
+	}
+}
+
+// spec 011 FR-008: keys are validated before any request.
+func TestValidKey(t *testing.T) {
+	for _, bad := range []string{"", " a", "a ", strings.Repeat("x", 129), "a\nb", "a\x00b"} {
+		if identity.ValidKey(bad) == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	for _, good := range []string{"a", "rack-ups-1", "stripe:cus_1/x y", strings.Repeat("é", 128)} {
+		if err := identity.ValidKey(good); err != nil {
+			t.Errorf("%q rejected: %v", good, err)
+		}
+	}
+	f := setup(t)
+	if _, err := identity.ResolveHost(context.Background(), f.api, f.target, " id", false, quiet); err == nil {
+		t.Fatal("invalid key resolved")
+	}
+	if len(f.srv.Requests()) != 0 {
+		t.Fatalf("requests made for an invalid key: %v", f.srv.Requests())
+	}
+}
+
+// Unresolved schema fails before any request (002 FR-016).
+func TestResolveHost_NeedsTarget(t *testing.T) {
+	f := setup(t)
+	if _, err := identity.ResolveHost(context.Background(), f.api, identity.Target{}, "id-1", false, quiet); err == nil {
+		t.Fatal("resolved without a target")
 	}
 }

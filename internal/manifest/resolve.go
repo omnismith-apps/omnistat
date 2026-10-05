@@ -35,6 +35,8 @@ type AttributeOverride struct {
 // Desired is the schema omnistat wants to exist: the union of all enabled
 // manifests after overrides (FR-011). Slices are sorted by slug.
 type Desired struct {
+	// Host is the host template's slug after overrides.
+	Host       string
 	Templates  []DesiredTemplate
 	Attributes []DesiredAttribute
 }
@@ -44,6 +46,12 @@ type DesiredTemplate struct {
 	Slug        string
 	Name        string
 	Description string
+	// Entity, Module and Key describe an entity template (spec 011 FR-001):
+	// the module that owns it and the manifest slug its provider targets it
+	// by, which overrides never change.
+	Entity bool
+	Module string
+	Key    string
 }
 
 // DesiredAttribute is an attribute that must exist and be bound to Templates.
@@ -62,6 +70,15 @@ type DesiredAttribute struct {
 	// unchanged: overrides may move an attribute's slug or template, but
 	// not where it can be collected (ADR-0007).
 	Platforms []string
+	// EntityTemplate is the manifest slug (DesiredTemplate.Key) of the entity
+	// template the attribute sits on; empty for attributes of the host entity
+	// (spec 011 FR-001, FR-006).
+	EntityTemplate string
+	// Target and Display are set for a reference: the template it points to
+	// and the attribute shown for the referenced record, both resolved slugs
+	// (spec 011 FR-003).
+	Target  string
+	Display string
 }
 
 // Template returns the desired template with the given slug, if any.
@@ -123,6 +140,54 @@ func Resolve(manifests []Manifest, ov Overrides) (Desired, error) {
 		}
 	}
 
+	// Entity templates (spec 011 FR-005): a module-level template override
+	// renames a module's entity template when all its attributes sit on it,
+	// and is an error otherwise; nothing may resolve onto the host template,
+	// and no two modules may share one.
+	entitySlug := map[string]map[string]string{} // module → manifest slug → resolved slug
+	entityOwner := map[string]string{}           // resolved slug → module
+	for _, m := range manifests {
+		mo := ov.Modules[m.Module]
+		var ents []string
+		for _, t := range m.Templates {
+			if t.Entity {
+				ents = append(ents, t.Slug)
+			}
+		}
+		if len(ents) == 0 {
+			continue
+		}
+		entitySlug[m.Module] = map[string]string{}
+		rename := ""
+		if mo.Template != "" && ValidSlug(mo.Template) {
+			allOnOne := len(ents) == 1
+			for _, a := range m.Attributes {
+				if a.Template != ents[0] {
+					allOnOne = false
+				}
+			}
+			if allOnOne {
+				rename = mo.Template
+			} else {
+				add("modules.%s.template: module %q declares an entity template, so its attributes cannot be moved together (spec 011 FR-005)", m.Module, m.Module)
+			}
+		}
+		for _, e := range ents {
+			slug := e
+			if rename != "" {
+				slug = rename
+			}
+			entitySlug[m.Module][e] = slug
+			if slug == host {
+				add("module %q: entity template %q cannot be the host template %q (spec 011 FR-005)", m.Module, e, host)
+			}
+			if prev, dup := entityOwner[slug]; dup && prev != m.Module {
+				add("entity template %q is used by both %q and %q", slug, prev, m.Module)
+			}
+			entityOwner[slug] = m.Module
+		}
+	}
+
 	templates := map[string]DesiredTemplate{}
 	declare := func(t DesiredTemplate) {
 		if _, exists := templates[t.Slug]; !exists {
@@ -132,7 +197,11 @@ func Resolve(manifests []Manifest, ov Overrides) (Desired, error) {
 	declare(DesiredTemplate{Slug: host, Name: HostTemplateName, Description: "A machine reporting through omnistat"})
 	for _, m := range manifests {
 		for _, t := range m.Templates {
-			declare(DesiredTemplate(t))
+			dt := DesiredTemplate{Slug: t.Slug, Name: t.Name, Description: t.Description}
+			if t.Entity {
+				dt.Slug, dt.Entity, dt.Module, dt.Key = entitySlug[m.Module][t.Slug], true, m.Module, t.Slug
+			}
+			declare(dt)
 		}
 	}
 
@@ -162,13 +231,28 @@ func Resolve(manifests []Manifest, ov Overrides) (Desired, error) {
 				da.Description = ao.Description
 			}
 			tpl := host
-			switch {
-			case ao.Template != "" && ValidSlug(ao.Template):
-				tpl = ao.Template
-			case mo.Template != "" && ValidSlug(mo.Template):
-				tpl = mo.Template
-			case a.Template != "":
-				tpl = a.Template
+			if ent, isEntity := entitySlug[m.Module][a.Template]; isEntity {
+				// An entity template's attributes stay on it (spec 011 FR-005).
+				tpl = ent
+				da.EntityTemplate = a.Template
+				if ao.Template != "" && ao.Template != ent {
+					add("module %q attribute %q: it belongs to entity template %q and cannot be moved to %q (spec 011 FR-005)", m.Module, a.Key, ent, ao.Template)
+				}
+			} else {
+				switch {
+				case ao.Template != "" && ValidSlug(ao.Template):
+					tpl = ao.Template
+				case mo.Template != "" && ValidSlug(mo.Template):
+					tpl = mo.Template
+				case a.Template != "":
+					tpl = a.Template
+				}
+				if owner, isEntity := entityOwner[tpl]; isEntity {
+					add("module %q attribute %q: template %q is module %q's entity template", m.Module, a.Key, tpl, owner)
+				}
+			}
+			if a.Kind == KindReference {
+				da.Target = host
 			}
 			da.Templates = []string{tpl}
 			if _, known := templates[tpl]; !known {
@@ -184,11 +268,40 @@ func Resolve(manifests []Manifest, ov Overrides) (Desired, error) {
 			attrs[da.Slug] = da
 		}
 	}
+	// The host's label is what a host link shows (spec 011 FR-003): the
+	// highest-ranked label attribute bound to the host template.
+	display, rank := "", 0
+	for _, m := range manifests {
+		for _, a := range m.Attributes {
+			if a.Label <= 0 {
+				continue
+			}
+			da, ok := attrs[slugOf(m.Module, a.Key, owner)]
+			if !ok || da.Templates[0] != host {
+				continue
+			}
+			if a.Label > rank || (a.Label == rank && da.Slug < display) {
+				display, rank = da.Slug, a.Label
+			}
+		}
+	}
+	for slug, da := range attrs {
+		if da.Kind != KindReference {
+			continue
+		}
+		if display == "" {
+			add("module %q attribute %q: the host template has no label attribute for the host link to show (spec 011 FR-003)", da.Module, da.Key)
+			continue
+		}
+		da.Display = display
+		attrs[slug] = da
+	}
+
 	if err := errors.Join(problems...); err != nil {
 		return Desired{}, err
 	}
 
-	var d Desired
+	d := Desired{Host: host}
 	for _, t := range templates {
 		d.Templates = append(d.Templates, t)
 	}
@@ -199,6 +312,40 @@ func Resolve(manifests []Manifest, ov Overrides) (Desired, error) {
 	}
 	sort.Slice(d.Attributes, func(i, j int) bool { return d.Attributes[i].Slug < d.Attributes[j].Slug })
 	return d, nil
+}
+
+// slugOf finds the resolved slug of module/key in the owner map (slug →
+// "module/key").
+func slugOf(module, key string, owner map[string]string) string {
+	id := module + "/" + key
+	for slug, o := range owner {
+		if o == id {
+			return slug
+		}
+	}
+	return ""
+}
+
+// EntityTemplate returns the entity template module declares as key (its
+// manifest slug), after overrides.
+func (d Desired) EntityTemplate(module, key string) (DesiredTemplate, bool) {
+	for _, t := range d.Templates {
+		if t.Entity && t.Module == module && t.Key == key {
+			return t, true
+		}
+	}
+	return DesiredTemplate{}, false
+}
+
+// HostLink returns the host link attribute of the entity template with the
+// given resolved slug (spec 011 FR-001).
+func (d Desired) HostLink(templateSlug string) (DesiredAttribute, bool) {
+	for _, a := range d.Attributes {
+		if a.Kind == KindReference && a.Templates[0] == templateSlug {
+			return a, true
+		}
+	}
+	return DesiredAttribute{}, false
 }
 
 // Find returns the desired attribute declared by module/key, after overrides.
