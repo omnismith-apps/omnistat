@@ -48,6 +48,9 @@ func (a *App) prepareLocal(e env, s config.Settings) (prepared, error) {
 	if err := s.RequireAPI(); err != nil {
 		return p, err
 	}
+	if err := a.Registry.Configure(s.ModuleSettings); err != nil {
+		return p, err
+	}
 	mods, err := a.Registry.Enabled(s.Modules)
 	if err != nil {
 		return p, err

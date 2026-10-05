@@ -126,3 +126,66 @@ func (r *Registry) Get(name string) (Module, bool) {
 	}
 	return r.entries[i].mod, true
 }
+
+// Configurable is a module with settings of its own under modules.<name> in
+// the config file (spec 012 FR-005).
+type Configurable interface {
+	// Settings lists the keys the module accepts.
+	Settings() []string
+	// Configure applies the operator's settings; a key it does not list is
+	// never passed, and an absent key means the module's default. It is
+	// called before any network call, and its error is fatal.
+	Configure(settings map[string]string) error
+}
+
+// Describer adds a module's own facts (key/value pairs) to its startup
+// schedule record (spec 012 FR-021).
+type Describer interface {
+	Describe() []any
+}
+
+// Configure checks every module's settings against what the module accepts
+// and applies them, disabled modules included, so that a typo is caught even
+// before the module is switched on (spec 012 FR-005). Settings for a module
+// that is not registered are an error.
+func (r *Registry) Configure(settings map[string]map[string]string) error {
+	var problems []string
+	for name := range settings {
+		if _, ok := r.index[name]; !ok {
+			problems = append(problems, fmt.Sprintf("unknown module %q (known: %s)", name, strings.Join(r.Names(), ", ")))
+		}
+	}
+	for _, e := range r.entries {
+		name := e.mod.Name()
+		given := settings[name]
+		c, ok := e.mod.(Configurable)
+		if !ok {
+			for k := range given {
+				problems = append(problems, fmt.Sprintf("modules.%s.%s: module %s has no settings of its own", name, k, name))
+			}
+			continue
+		}
+		accepted := map[string]bool{}
+		for _, k := range c.Settings() {
+			accepted[k] = true
+		}
+		unknown := false
+		for k := range given {
+			if !accepted[k] {
+				problems = append(problems, fmt.Sprintf("modules.%s.%s: unknown setting (module %s accepts: %s)", name, k, name, strings.Join(c.Settings(), ", ")))
+				unknown = true
+			}
+		}
+		if unknown {
+			continue
+		}
+		if err := c.Configure(given); err != nil {
+			problems = append(problems, fmt.Sprintf("modules.%s: %v", name, err))
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return fmt.Errorf("config: %s", strings.Join(problems, "; "))
+	}
+	return nil
+}

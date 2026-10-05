@@ -32,6 +32,9 @@ fi
 E2E_BASE_URL=$(sed -E 's#//(localhost|127\.0\.0\.1|0\.0\.0\.0)([:/]|$)#//host.docker.internal\2#' <<<"$OMNISMITH_BASE_URL")
 export OMNISMITH_ACCESS_TOKEN OMNISMITH_PROJECT_ID E2E_BASE_URL
 [[ -x "$BIN" ]] || { echo "build first: make build" >&2; exit 1; }
+# The fake apcupsd of the ups checks (spec 012 NFR-006).
+NIS="$(mktemp -d)/e2e-nis"
+(cd "$ROOT" && CGO_ENABLED=0 go build -o "$NIS" ./scripts/e2e-nis) || { echo "cannot build scripts/e2e-nis" >&2; exit 1; }
 
 # Units that would reach the shared kernel, devices or clock of a privileged
 # container, or have no business in one.
@@ -134,6 +137,8 @@ run_distro() {
 	in_c mkdir -p /opt/dl /opt/dl2
 	docker cp -q "$BIN" "$C:/opt/dl/omnistat"
 	docker cp -q "$BIN" "$C:/opt/dl2/omnistat"
+	docker cp -q "$NIS" "$C:/usr/bin/e2e-nis"
+	docker exec -d "$C" /usr/bin/e2e-nis -addr 127.0.0.1:3551 -serial "E2E-$DISTRO-$(date +%s)"
 
 	out=$(with_api /opt/dl/omnistat schema plan 2>&1)
 	has "API reachable from the container" "changes|to create|no changes" "$out"
@@ -225,7 +230,7 @@ run_distro() {
 
 	# US-5: install again from another path, with the token set (replacing the revoked one)
 	# and a new NO_PROXY; a drop-in and an edited config stay; no prompt (no terminal here).
-	in_c sh -c 'mkdir -p /etc/systemd/system/omnistat.service.d && printf "[Service]\nEnvironment=OMNISTAT_E2E_DROPIN=1\n" > /etc/systemd/system/omnistat.service.d/override.conf && echo "log: {level: debug}" >> /etc/omnistat/omnistat.yaml'
+	in_c sh -c 'mkdir -p /etc/systemd/system/omnistat.service.d && printf "[Service]\nEnvironment=OMNISTAT_E2E_DROPIN=1\n" > /etc/systemd/system/omnistat.service.d/override.conf && printf "log: {level: debug}\nmodules:\n  ups:\n    enabled: true\n" >> /etc/omnistat/omnistat.yaml'
 	out=$(docker exec -e OMNISMITH_ACCESS_TOKEN -e NO_PROXY=example.invalid -e OMNISMITH_BASE_URL="$E2E_BASE_URL" "$C" /opt/dl2/omnistat service install 2>&1)
 	has "upgrade: updated and running (US-5/1)" "update of the installed service" "$out"
 	has "upgrade: binary replaced (US-5/1)" "replace /usr/local/bin/omnistat with /opt/dl2/omnistat" "$out"
@@ -259,6 +264,15 @@ run_distro() {
 		ko "net: nothing omitted inside the sandbox (010 NFR-003)" "$(grep 'module=net' <<<"$out" | tail -5)"
 	else
 		ok "net: nothing omitted inside the sandbox (010 NFR-003)"
+	fi
+	# Spec 012 NFR-003/NFR-006, ADR-0015: the service sandbox lets the ups module
+	# reach apcupsd's NIS on loopback; the UPS is found and nothing fails.
+	has "ups: apcupsd read on loopback inside the sandbox (012 NFR-003)" 'msg="UPS found" module=ups address=127.0.0.1:3551' "$out"
+	has "ups: its record resolved by key (011 FR-011)" 'msg="entity resolved" module=ups template=ups key=E2E-' "$out"
+	if grep -q 'msg="collection failed" module=ups' <<<"$out"; then
+		ko "ups: no collection failure inside the sandbox (012 NFR-003)" "$(grep 'module=ups' <<<"$out" | tail -5)"
+	else
+		ok "ups: no collection failure inside the sandbox (012 NFR-003)"
 	fi
 	n=$(in_c journalctl -u omnistat "_PID=$pid" --no-pager -o cat | grep -c 'no physical network interface' || true)
 	check "net: no physical interface in a bridged container, said once (010 FR-009)" test "$n" = 1

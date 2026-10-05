@@ -148,6 +148,9 @@ recognise hosts in Omnismith (the identity is an opaque token, 002 US-4).
   goroutines that outlive a call, buffers or any network access (ADR-0005). A call MUST
   carry a deadline; a collection that has not returned by its next scheduled tick is
   cancelled and counts as failed for that tick.
+  *(Amended 2026-10-05 by ADR-0015, spec 012: a provider may make one short-lived,
+  read-only, deadline-bound request to a local information service named in its
+  module's settings. It never reaches the Omnismith API, and no connection outlives the call.)*
 - **FR-005** The `machine-id` module's provider role is identity only (002); it MUST NOT
   produce periodic values and its attribute is never re-published by the loop.
 
@@ -166,6 +169,9 @@ recognise hosts in Omnismith (the identity is an opaque token, 002 US-4).
 - **FR-010** A provider failure (error or deadline) MUST NOT stop the loop or affect
   other modules: the failure is logged with module and reason, the tick is skipped, and
   the module is called again at its next tick.
+  *(Amended 2026-10-05 by spec 012 FR-018: in the daemon, a failure is logged at warn the
+  first time it occurs with a reason. Repeats are counted, at debug, and reported in the
+  publish summary, and the first success after failures is logged at info.)*
 - **FR-011** Collections of the same module MUST NOT overlap; collections of different
   modules MAY run concurrently.
 

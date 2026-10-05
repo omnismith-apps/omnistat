@@ -35,7 +35,9 @@
 # Per-module settings. Each module has its own collection interval (1s–24h);
 # a module can be switched off (neither its schema nor its values), moved to
 # another template, or have an attribute mapped onto an existing one.
-# Attribute keys are listed in the README.
+# Attribute keys are listed in the README. The ups module (off by default,
+# Linux) reads apcupsd's Network Information Server at address and keys the UPS
+# by its serial number unless identity pins another key.
 # modules:
 #   hostname:
 #     interval: 5m
@@ -51,6 +53,10 @@
 #   memory:
 #     interval: 30s
 #     enabled: true
+#   ups:
+#     enabled: false
+#     address: 127.0.0.1:3551
+#     identity: rack-ups-1
 
 # Pin the host identity instead of discovering it from the OS (for cloned
 # machines, or to keep an entity across a reinstall of the OS).

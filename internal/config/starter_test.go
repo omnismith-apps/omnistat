@@ -100,6 +100,9 @@ func yamlKeys(t reflect.Type) []string {
 	var keys []string
 	for f := range t.Fields() {
 		tag, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
+		if tag == "-" {
+			continue // not a key of the file (module settings, spec 012 FR-005)
+		}
 		keys = append(keys, tag)
 		ft := f.Type
 		for ft.Kind() == reflect.Map || ft.Kind() == reflect.Pointer {

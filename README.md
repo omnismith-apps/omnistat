@@ -205,6 +205,7 @@ On Windows, in an elevated PowerShell:
 | `memory` | `mem_used_pct`, `mem_available_mib` (metrics); `mem_total_mib` (dimension) | 30s |
 | `disk` | `disk_root_used_pct`, `disk_root_available_gib`, `disk_root_inodes_used_pct`, `disk_read_mibps`, `disk_write_mibps`, `disk_read_iops`, `disk_write_iops`, `disk_busy_pct` (metrics); `disk_root_total_gib` (dimension) | 30s |
 | `net` | `net_rx_mbps`, `net_tx_mbps`, `net_rx_pps`, `net_tx_pps`, `net_rx_errors_ps`, `net_tx_errors_ps`, `net_rx_drops_ps`, `net_tx_drops_ps`, `net_tcp_established`, `net_tcp_retrans_pct`, `net_tcp_resets_ps`, `net_tcp_listen_drops_ps`, `net_tcp_time_wait`, `net_udp_errors_ps`, `net_conntrack_used_pct` (metrics) | 30s |
+| `ups` | **Off by default; Linux only.** The UPS as its own entity on template `ups`, keyed by its serial number and linked to the host by `ups_host`: `ups_on_battery`, `ups_battery_low`, `ups_replace_battery`, `ups_comm_lost`, `ups_overload` (booleans); `ups_last_transfer_at`, `ups_last_transfer_reason`, `ups_selftest`, `ups_name`, `ups_model`, `ups_serial`, `ups_battery_date` (dimensions); `ups_battery_charge_pct`, `ups_runtime_min`, `ups_load_pct`, `ups_load_w`, `ups_input_v`, `ups_output_v`, `ups_battery_v`, `ups_temp_c`, `ups_input_hz` (metrics) | 10s |
 
 CPU usage is the non-idle share of the CPU time that elapsed since the previous reading,
 aggregated across every logical CPU, so a fully busy 8-core host reports 100, not 800,
@@ -257,9 +258,31 @@ demand. **`net_tcp_listen_drops_ps`, `net_tcp_time_wait` and `net_conntrack_used
 Linux-only**, and **macOS collects no `net` value**: gopsutil reads its interface counters
 by running `netstat`, which omnistat never does.
 
+**UPS (`ups`, from apcupsd).** Enable it on the host the UPS is plugged into, which runs
+[apcupsd](http://www.apcupsd.org/) with its Network Information Server on
+(`NETSERVER on`, `NISIP 127.0.0.1`, `NISPORT 3551` in `/etc/apcupsd/apcupsd.conf`; these
+are the defaults, apart from `NISIP`, which defaults to every interface). Every 10s
+omnistat asks apcupsd for its status: the same record `apcaccess status` prints. The UPS
+becomes a record of its own on the `ups` template, identified by its serial number, so
+replacing the host or reinstalling omnistat keeps its history. For a UPS that reports no
+serial, or to keep one record across a UPS swap, set `modules.ups.identity`. The state
+fields are dimensions, so automations can react when they change: `ups_on_battery` for
+an outage and the power coming back, `ups_replace_battery` when the UPS asks for a new
+battery, `ups_comm_lost` when apcupsd loses the UPS. `ups_last_transfer_at` changes on
+*every* transfer to battery, including dips shorter than the 10s poll and self-tests
+(`ups_last_transfer_reason` tells them apart). A change reaches Omnismith at the next
+publish, at most 10s + `publish.interval` later. Readings the UPS does not report (many
+USB models have no output voltage, temperature or frequency) are logged once and not
+published. While apcupsd has lost the UPS, only `ups_comm_lost` and the identity fields
+are published, because every other reading is stale. If apcupsd is unreachable, that is
+logged once, the repeats are counted in the publish summary, and the recovery is logged.
+`ups_load_w` is an **estimate**: load % × the UPS's nominal power. NIS is unauthenticated
+and unencrypted, so keep it on loopback. A remote `address` works, but the status
+crosses the network in clear text.
+
 **Records other than the host** (spec 011). omnistat finds each record it owns by its
-platform **external key**: the host by its identity, a module's device
-by the key the module reports (no shipped module owns records yet; the `ups` module will). Host entities created by omnistat 0.5 and earlier are
+platform **external key**: the host by its identity, a module's device (such as the UPS)
+by the key the module reports. Host entities created by omnistat 0.5 and earlier are
 adopted on the first start: found by `machine_id` and given their key. A key that someone
 else already set is never changed.
 
@@ -292,6 +315,11 @@ modules:
     interval: 30s        # disk's own default; the I/O rates are averages over it
   net:
     interval: 30s        # net's own default; the rates are averages over it
+  ups:
+    enabled: true        # off by default: only on the host the UPS is plugged into
+    address: 127.0.0.1:3551   # apcupsd's Network Information Server
+    # identity: rack-ups-1    # pin the UPS's key (default: its serial number)
+    # template: power_device  # move the UPS records to an existing template
 identity:
   static: rack7-node3    # optional: pin the identity instead of autodiscovering it
 http: { timeout: 15s, retries: 3 }

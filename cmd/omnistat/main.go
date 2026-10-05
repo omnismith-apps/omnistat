@@ -21,6 +21,7 @@ import (
 	"github.com/omnismith-apps/omnistat/internal/module/machineid"
 	"github.com/omnismith-apps/omnistat/internal/module/memory"
 	"github.com/omnismith-apps/omnistat/internal/module/network"
+	"github.com/omnismith-apps/omnistat/internal/module/ups"
 	"github.com/omnismith-apps/omnistat/internal/systemd"
 	"github.com/omnismith-apps/omnistat/internal/winsvc"
 )
@@ -61,12 +62,13 @@ func main() {
 // registry lists the modules compiled into this build.
 func registry() *module.Registry {
 	r := module.NewRegistry()
-	r.Register(machineid.New(), module.Required()) // spec 002 FR-002
-	r.Register(hostname.New())                     // spec 003 FR-023
-	r.Register(cpu.New())                          // spec 004 FR-002
-	r.Register(memory.New())                       // spec 005 FR-002
-	r.Register(disk.New())                         // spec 008 FR-002
-	r.Register(network.New())                      // spec 010 FR-002
+	r.Register(machineid.New(), module.Required())    // spec 002 FR-002
+	r.Register(hostname.New())                        // spec 003 FR-023
+	r.Register(cpu.New())                             // spec 004 FR-002
+	r.Register(memory.New())                          // spec 005 FR-002
+	r.Register(disk.New())                            // spec 008 FR-002
+	r.Register(network.New())                         // spec 010 FR-002
+	r.Register(ups.New(), module.DisabledByDefault()) // spec 012 FR-003
 	return r
 }
 

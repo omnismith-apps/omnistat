@@ -7,13 +7,14 @@ justifies them against a requirement ID (constitution VI).
 | `config` | YAML + environment settings, validation | 001 |
 | `manifest` | Module schema contracts (entity templates, host links, label ranks), overrides, desired schema (pure) | 001, 011 |
 | `schema` | Diff of desired vs current schema (references created last), additive apply, resolved ids | 001, 011 |
-| `module` | `Module` / `Provider` contracts, the registry, and `Omissions` (one omission record per collection) | 001, 003, 005 |
+| `module` | `Module` / `Provider` / `Configurable` / `Describer` contracts, the registry (with module settings), and `Omissions` (one omission record per collection) | 001, 003, 005, 012 |
 | `module/machineid` | Identity module: `machine_id` attribute, OS discovery, derivation | 002 |
 | `module/hostname` | Reference value module: `hostname` dimension | 003 |
 | `module/cpu` | First metric provider: usage rate, load averages, CPU dimensions | 004, 005 |
 | `module/memory` | Memory used %, available and total; stateless, macOS total-only | 005 |
 | `module/disk` | System volume space and inodes; physical-disk I/O rates, busiest disk | 008 |
 | `module/network` | The `net` module: physical-interface traffic, packet, error and drop rates; TCP/UDP health; connection-tracking use | 010 |
+| `module/ups` | The `ups` module: apcupsd NIS client, status parser, the UPS as its own entity (ADR-0015) | 012 |
 | `hostread` | Stateless per-area host readers (CPU, memory, disk, network, with Linux device and interface classification; Windows IP Helper calls); the only package importing gopsutil (ADR-0009) | 005, 008, 010 |
 | `module/moduletest` | Fixture modules (`probe`, `volume`, `ident`, `gadget`: names no real module uses) and scripted providers for tests | 001, 003, 008, 011 |
 | `identity` | Entities by external key: the host (with adoption of pre-key hosts) and module-owned entities (`Keyed`) | 002, 011 |

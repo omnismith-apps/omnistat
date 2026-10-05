@@ -373,3 +373,30 @@ func TestDaemon_LogEveryPublish(t *testing.T) {
 		t.Fatalf("every publish at info: %d\n%s", n, r.stderr)
 	}
 }
+
+// spec 012 FR-018: a module failing the same way on every tick warns once;
+// its repeats are reported in the summary; its recovery is logged at info.
+func TestDaemon_RepeatedCollectionFailure(t *testing.T) {
+	h := newHarness(t, "modules:\n  probe:\n    interval: 20s\npublish:\n  interval: 1m\nlog:\n  summary_interval: 1m\n")
+	h.probeFail.Store(true)
+	d := h.daemon(context.Background())
+	h.parked(t)
+	for range 3 { // t=60: three more failures, then the publish and its summary
+		h.clock.Advance(20 * time.Second)
+		h.parked(t)
+	}
+	logs := h.logsSnapshot()
+	if n := strings.Count(logs, `level=WARN msg="collection failed" module=probe`); n != 1 {
+		t.Fatalf("warned %d times, want once:\n%s", n, logs)
+	}
+	if !strings.Contains(logs, `level=INFO msg="collection failures" period=1m0s repeated="probe=3"`) {
+		t.Fatalf("no repeat count in the summary:\n%s", logs)
+	}
+	h.probeFail.Store(false)
+	h.clock.Advance(20 * time.Second)
+	h.parked(t)
+	if !strings.Contains(h.logsSnapshot(), `level=INFO msg="collection recovered" module=probe after_failures=4`) {
+		t.Fatalf("no recovery record:\n%s", h.logsSnapshot())
+	}
+	d.stop(t)
+}

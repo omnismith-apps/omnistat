@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -257,5 +259,42 @@ func TestLoad_SummaryInterval(t *testing.T) {
 		if _, err := config.Load(path, env(nil)); err == nil || !strings.Contains(err.Error(), "log.summary_interval") {
 			t.Errorf("%s must be rejected: %v", bad, err)
 		}
+	}
+}
+
+// spec 012 FR-005: a module block's own keys are kept as settings; the common
+// keys stay strict; a setting must be a single value.
+func TestLoad_ModuleSettings(t *testing.T) {
+	path := t.TempDir() + "/c.yaml"
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("modules:\n  ups:\n    enabled: true\n    interval: 20s\n    address: 127.0.0.1:3552\n    identity: rack-ups-1\n    retries: 3\n  cpu:\n    interval: 10s\n")
+	s, err := config.Load(path, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]map[string]string{"ups": {"address": "127.0.0.1:3552", "identity": "rack-ups-1", "retries": "3"}}
+	if !reflect.DeepEqual(s.ModuleSettings, want) {
+		t.Fatalf("settings = %v, want %v", s.ModuleSettings, want)
+	}
+	if !s.Modules["ups"] || s.Intervals["ups"] != 20*time.Second || s.Intervals["cpu"] != 10*time.Second {
+		t.Fatalf("common keys lost: %+v %+v", s.Modules, s.Intervals)
+	}
+
+	write("modules:\n  ups:\n    address:\n      host: x\n")
+	if _, err := config.Load(path, func(string) string { return "" }); err == nil || !strings.Contains(err.Error(), "single value") {
+		t.Fatalf("nested setting: %v", err)
+	}
+	write("modules:\n  cpu:\n    attributes:\n      usage:\n        slgu: x\n")
+	if _, err := config.Load(path, func(string) string { return "" }); err == nil {
+		t.Fatal("a typo inside attributes must stay an error")
+	}
+	write("modules:\n  cpu:\n    interval: 10s\n")
+	if s, err := config.Load(path, func(string) string { return "" }); err != nil || s.ModuleSettings != nil {
+		t.Fatalf("no settings: %v %v", s.ModuleSettings, err)
 	}
 }

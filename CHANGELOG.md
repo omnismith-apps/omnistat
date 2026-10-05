@@ -5,13 +5,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
-Every record omnistat owns is identified by its platform key, and modules may own records of their own.
+omnistat monitors a UPS, and every record it owns is identified by its platform key.
 
 ### Added
+- The `ups` module (feature 012, ADR-0015), **off by default, Linux only**: a UPS read
+  from apcupsd's Network Information Server (`modules.ups.address`, default
+  `127.0.0.1:3551`), every 10s. The UPS becomes **its own record** on a new `ups`
+  template, keyed by its serial number (or `modules.ups.identity`) and linked to the
+  host by `ups_host`:
+  - state for automations: on battery, battery low, replace battery, communication
+    lost, overload, the time and reason of the last transfer to battery (which changes
+    even for dips shorter than the poll), and the last self-test result;
+  - identity: name, model, serial number, battery date;
+  - metrics: battery charge, runtime left, load %, estimated load in watts, input,
+    output and battery voltage, temperature, line frequency.
+
+  Readings a UPS does not report are logged once. While apcupsd has lost the UPS, only
+  the communication flag and the identity are published.
 - Records other than the host (feature 011, ADR-0014): a module can own an *entity
   template*. Each record is created once, linked to the host by a reference that shows
   the hostname, and published with its own values. `run --dry-run` shows each record,
   and whether it would be created.
+- Module settings: a module may accept keys of its own under `modules.<name>` (first
+  used by `ups`). An unknown key is still an error.
 
 ### Changed
 - **The host entity is found by its platform external key** (feature 011, ADR-0014),
@@ -21,6 +37,9 @@ Every record omnistat owns is identified by its platform key, and modules may ow
   by `machine_id` once and given their key. A key someone else already set is never
   changed. `omnistat identity` says when a host would be adopted. `machine_id` is still
   published.
+- A module that keeps failing for the same reason is logged once at warn, not on every
+  collection. Repeats are counted in the daemon's publish summary, and the recovery is
+  logged with the number of failures (amends spec 003 FR-010).
 - The one-shot `run` exits with the partial status when a module's record could not be
   written.
 - Omnismith Go SDK upgraded from v1.0.15 to v1.0.18.

@@ -147,6 +147,7 @@ type Scheduler struct {
 	firstOnce sync.Once
 	first     chan struct{}
 	done      chan struct{}
+	failures  failureLog
 }
 
 // NewScheduler builds a scheduler; Run starts it.
@@ -182,7 +183,11 @@ func (s *Scheduler) Run(ctx context.Context) {
 			first := true
 			for {
 				start := s.clock.Now()
-				_ = collectOne(ctx, s.clock, s.buf, s.log, src) // errors are logged; the tick is skipped (FR-010)
+				if err := collectOne(ctx, s.clock, s.buf, s.log, src); err != nil {
+					s.failures.failed(s.log, src.Module, err) // the tick is skipped (FR-010)
+				} else {
+					s.failures.succeeded(s.log, src.Module)
+				}
 				if first {
 					pending.Done()
 					first = false
@@ -217,8 +222,7 @@ func collectOne(ctx context.Context, clock Clock, buf Sink, log *slog.Logger, sr
 	cancel()
 	at := clock.Now().UTC()
 	if err != nil {
-		log.Warn("collection failed", "module", src.Module, "error", err)
-		return err
+		return err // logged by the caller (spec 012 FR-018)
 	}
 	kept := 0
 	var badKeys []string
@@ -264,6 +268,56 @@ func collectOne(ctx context.Context, clock Clock, buf Sink, log *slog.Logger, sr
 	}
 	log.Debug("collected", "module", src.Module, "observations", kept, "at", at)
 	return nil
+}
+
+// TakeFailureCounts returns, per module, the failures logged at debug only
+// since the last call (repeats of a reason already logged), and resets them.
+// The daemon reports them in its publish summary (spec 012 FR-018).
+func (s *Scheduler) TakeFailureCounts() map[string]int { return s.failures.take() }
+
+// failureLog keeps a module's repeated collection failures out of the warn
+// log (spec 012 FR-018, amending 003 FR-010): the first failure with a reason
+// is a warning, repeats are counted at debug, and the first success after
+// failures says how many there were.
+type failureLog struct {
+	mu      sync.Mutex
+	reason  map[string]string // module → reason of the current streak
+	streak  map[string]int    // module → failures in the current streak
+	pending map[string]int    // module → repeats not yet reported
+}
+
+func (f *failureLog) failed(log *slog.Logger, module string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.reason == nil {
+		f.reason, f.streak, f.pending = map[string]string{}, map[string]int{}, map[string]int{}
+	}
+	f.streak[module]++
+	if reason := err.Error(); f.reason[module] != reason {
+		f.reason[module] = reason
+		log.Warn("collection failed", "module", module, "error", err)
+		return
+	}
+	f.pending[module]++
+	log.Debug("collection failed again", "module", module, "error", err, "failures", f.streak[module])
+}
+
+func (f *failureLog) succeeded(log *slog.Logger, module string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if n := f.streak[module]; n > 0 {
+		log.Info("collection recovered", "module", module, "after_failures", n)
+	}
+	delete(f.streak, module)
+	delete(f.reason, module)
+}
+
+func (f *failureLog) take() map[string]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := f.pending
+	f.pending = map[string]int{}
+	return out
 }
 
 // targetOf checks that an observation names the entity its attribute belongs
@@ -321,6 +375,7 @@ func Once(ctx context.Context, sources []Source, buf Sink, clock Clock, log *slo
 		go func(src Source) {
 			defer wg.Done()
 			if err := collectOne(ctx, clock, buf, log, src); err != nil {
+				log.Warn("collection failed", "module", src.Module, "error", err)
 				mu.Lock()
 				failed = append(failed, src.Module)
 				mu.Unlock()

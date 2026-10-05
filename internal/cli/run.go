@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/omnismith-apps/omnistat/internal/config"
 	"github.com/omnismith-apps/omnistat/internal/identity"
 	"github.com/omnismith-apps/omnistat/internal/manifest"
+	"github.com/omnismith-apps/omnistat/internal/module"
 	"github.com/omnismith-apps/omnistat/internal/module/machineid"
 	"github.com/omnismith-apps/omnistat/internal/publish"
 	"github.com/omnismith-apps/omnistat/internal/schema"
@@ -63,7 +65,13 @@ func (a *App) run(e env, args []string) int {
 		return fail(e, err)
 	}
 	for _, src := range sources {
-		e.log.Info("module scheduled", "module", src.Module, "interval", src.Interval)
+		attrs := []any{"module", src.Module, "interval", src.Interval}
+		if mod, ok := a.Registry.Get(src.Module); ok {
+			if d, ok := mod.(module.Describer); ok {
+				attrs = append(attrs, d.Describe()...) // spec 012 FR-021
+			}
+		}
+		e.log.Info("module scheduled", attrs...)
 	}
 	// What this platform cannot collect is said once, here — never once per
 	// tick (spec 004 FR-016, FR-023).
@@ -202,6 +210,9 @@ type loop struct {
 	stats        publishStats
 	succeeded    bool // a publish has succeeded since start
 	failStreak   int  // failed publishes since the last success
+	// sched is the daemon's scheduler; its repeated collection failures go
+	// into the summary (spec 012 FR-018).
+	sched *collect.Scheduler
 }
 
 // publishStats accumulates daemon publishes between two summaries (FR-026a).
@@ -242,6 +253,11 @@ func (l *loop) summarize(final bool) {
 		return
 	}
 	st := l.stats
+	if l.sched != nil {
+		if counts := l.sched.TakeFailureCounts(); len(counts) > 0 {
+			l.env.log.Info("collection failures", "period", period, "repeated", formatCounts(counts))
+		}
+	}
 	l.env.log.Info("publish summary", "period", period, "publishes", st.publishes, "dimensions", st.dims, "observations", st.obs,
 		"requests", st.reqs, "dropped", st.dropped, "failed", st.failed, "entities", st.entities, "entities_failed", st.entitiesFailed,
 		"max_duration", st.maxDuration)
@@ -284,6 +300,7 @@ func (l *loop) daemon() int {
 	ctx := l.env.ctx
 	sctx, cancel := context.WithCancel(ctx)
 	sched := collect.NewScheduler(l.sources, l.bufs, l.clock, l.env.log)
+	l.sched = sched
 	go sched.Run(sctx)
 	stop := func() {
 		cancel()
@@ -370,6 +387,20 @@ func (l *loop) publish(ctx context.Context) (publish.Result, error) {
 	}
 	l.succeeded, l.failStreak = true, 0
 	return res, nil
+}
+
+// formatCounts renders module → count as "a=1,b=2", sorted.
+func formatCounts(counts map[string]int) string {
+	names := make([]string, 0, len(counts))
+	for n := range counts {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	parts := make([]string, len(names))
+	for i, n := range names {
+		parts[i] = fmt.Sprintf("%s=%d", n, counts[n])
+	}
+	return strings.Join(parts, ",")
 }
 
 // skippedLines renders the platform skips for the dry-run JSON document.

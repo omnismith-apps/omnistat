@@ -79,6 +79,11 @@ type Settings struct {
 	}
 	// Identity is the static host identity, "" for autodiscovery (spec 002).
 	Identity string
+	// ModuleSettings holds each module's own settings: every scalar key
+	// under modules.<name> other than enabled, interval, template and
+	// attributes, as a string (spec 012 FR-005). Which keys a module accepts
+	// is checked against the module, not here.
+	ModuleSettings map[string]map[string]string
 }
 
 // RequireAPI checks that the settings can reach the API (token and project).
@@ -125,6 +130,60 @@ type moduleFile struct {
 	Interval   string                   `yaml:"interval"`
 	Template   string                   `yaml:"template"`
 	Attributes map[string]attributeFile `yaml:"attributes"`
+	// Settings are the module's own keys (spec 012 FR-005).
+	Settings map[string]string `yaml:"-"`
+}
+
+// commonModuleKeys are the keys every module block may carry; any other key
+// is a module setting.
+var commonModuleKeys = map[string]bool{"enabled": true, "interval": true, "template": true, "attributes": true}
+
+// UnmarshalYAML splits a module block into the common keys, decoded strictly,
+// and the module's own settings, which must be scalars (spec 012 FR-005).
+func (m *moduleFile) UnmarshalYAML(data []byte) error {
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	common := map[string]any{}
+	for k, v := range raw {
+		if commonModuleKeys[k] {
+			common[k] = v
+			continue
+		}
+		switch x := v.(type) {
+		case string:
+			m.setting(k, x)
+		case bool, int, int64, uint64, float64:
+			m.setting(k, fmt.Sprint(x))
+		case nil:
+			m.setting(k, "")
+		default:
+			return fmt.Errorf("%s: a module setting must be a single value, not %T", k, v)
+		}
+	}
+	if len(common) == 0 {
+		return nil
+	}
+	again, err := yaml.Marshal(common)
+	if err != nil {
+		return err
+	}
+	type plain moduleFile // no UnmarshalYAML: no recursion
+	var p plain
+	if err := yaml.UnmarshalWithOptions(again, &p, yaml.Strict()); err != nil {
+		return err
+	}
+	p.Settings = m.Settings
+	*m = moduleFile(p)
+	return nil
+}
+
+func (m *moduleFile) setting(k, v string) {
+	if m.Settings == nil {
+		m.Settings = map[string]string{}
+	}
+	m.Settings[k] = v
 }
 
 type attributeFile struct {
@@ -216,6 +275,12 @@ func LoadWithDefault(path, defaultPath string, getenv func(string) string) (Sett
 		s.Overrides.Modules = map[string]manifest.ModuleOverride{}
 	}
 	for name, mf := range f.Modules {
+		if len(mf.Settings) > 0 {
+			if s.ModuleSettings == nil {
+				s.ModuleSettings = map[string]map[string]string{}
+			}
+			s.ModuleSettings[name] = mf.Settings
+		}
 		if mf.Enabled != nil {
 			s.Modules[name] = *mf.Enabled
 		}
