@@ -383,7 +383,7 @@ func (s *Server) schemaDoc() map[string]any {
 		}
 		tpls = append(tpls, map[string]any{
 			"id": t.ID, "slug": t.Slug, "name": t.Name, "description": t.Description,
-			"attributes": attrs, "rules": []any{}, "actions": []any{},
+			"attributes": attrs, "rules": []any{}, "actions": []any{}, "inbound_endpoints": []any{},
 		})
 	}
 	attrs := []map[string]any{}

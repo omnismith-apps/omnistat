@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+### Changed
+- Omnismith Go SDK upgraded from v1.0.15 to v1.0.18. No change in behaviour.
+
 ## [0.5.0] - 2026-09-27
 
 omnistat reports the network.

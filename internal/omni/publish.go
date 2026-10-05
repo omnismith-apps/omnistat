@@ -36,7 +36,8 @@ func (c *Client) UpdateEntity(ctx context.Context, entityID string, attrs map[st
 		bf.UpdatedAt = &at
 		values[slug] = omnismithsdk.EntityAttributesInputValue{EntityAttributesInputValueAnyOf: bf}
 	}
-	req := omnismithsdk.NewUpdateEntityRequest(values)
+	req := omnismithsdk.NewUpdateEntityRequest()
+	req.SetAttributes(values)
 	resp, err := c.sdk.EntityAPI.UpdateEntity(ctx, entityID).UpdateEntityRequest(*req).Execute() //nolint:bodyclose // Execute drains and closes the body
 	return mapErr("update entity", resp, err)
 }

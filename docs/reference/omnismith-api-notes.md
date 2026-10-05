@@ -11,7 +11,11 @@ Working notes for agents. Verify against the OpenAPI contract (`openapi.yaml` in
 
 ## Go SDK
 
-- Module: `github.com/omnismith-sdk/go` (pinned: **v1.0.15**, `go 1.23`).
+- Module: `github.com/omnismith-sdk/go` (pinned: **v1.0.18**, `go 1.23`).
+- v1.0.18 breaking changes met on upgrade (2026-10-05): `NewUpdateEntityRequest()` takes no
+  arguments (`attributes` became optional, since an update may change only `external_key`),
+  so set them with `SetAttributes`; each template in `GET /discovery/project-schema` must
+  carry `inbound_endpoints` (the fake API in `omnitest` sends `[]`).
 - OpenAPI-generated, flat package. Import as `omnismithsdk "github.com/omnismith-sdk/go"`.
 - Construction:
   ```go
@@ -195,6 +199,29 @@ gopsutil v4.26.8 `net.IOCountersWithContext(ctx, true)` and
   `ifconfig -l`), which the no-external-command rule forbids; `ProtoCounters` returns
   "not implemented". Nothing is read there (spec 010 FR-018).
 - All six `make crosscheck` targets built the spike with `CGO_ENABLED=0`.
+
+## Entity external keys (studied 2026-10-05, SDK v1.0.18; not yet used by omnistat)
+
+An entity may hold an **`external_key`**: the id another system uses for it. It is a
+standard field next to `id`, `created_at` and `updated_at`, not an attribute.
+
+- **Uniqueness**: one live record per (template, key). A partial unique index on the
+  entity table enforces it **synchronously, at write time**. The asynchronous lag above
+  affects search and the read models, not this check. Case-sensitive, 1–255 characters
+  after trimming, no control characters. A deleted record releases its key.
+- **`PUT /entities/template/{template}/by-key`** (`upsertEntityByKey`) takes
+  `{external_key, attributes}`, where `attributes` may be `{}`. It creates the record
+  with the key (201) or partially updates the live record holding it (200), and returns
+  `{id, created}`. Two concurrent upserts of a new key race on the index; the loser is
+  retried once server-side as an update. A **409** means "send it again". Metrics in
+  `attributes` are appended on either branch.
+- **`GET /entities/template/{template}/by-key?key=`** (`getEntityByKey`): the live record,
+  or 404.
+- **`PATCH /entities/{id}`** accepts `external_key` (set or change; `null` clears;
+  omitted leaves it). A 409 means another live record of the template holds it.
+- Create, batch (`op: upsert`), CSV import/export, search filters and sort, and
+  automation templates (`{entity.external_key}`, `create_entity` actions) all know the
+  key. Server source: `api-ng/src/Entity/Application/Command/UpsertEntityByKey/Handler.php`.
 
 ## Writes are processed asynchronously — never assume read-your-writes
 
